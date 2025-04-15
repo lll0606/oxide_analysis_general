@@ -1,0 +1,392 @@
+"""
+Data Processing Module for Oxide Descriptor Analysis
+
+This module provides functionality for loading, preprocessing, and creating
+physics-informed features for oxide descriptor data.
+"""
+
+import pandas as pd
+import numpy as np
+import logging
+from typing import Dict, List, Tuple, Optional
+from sklearn.preprocessing import StandardScaler, RobustScaler
+
+from .config import DEFAULT_CONFIG
+
+# Configure logger
+logger = logging.getLogger(__name__)
+
+
+class DataProcessor:
+    """Class for loading and preprocessing oxide descriptor data"""
+    
+    def __init__(self, config: Dict):
+        """
+        Initialize the data processor with configuration
+        
+        Args:
+            config: Dictionary containing configuration parameters
+        """
+        self.config = config
+        self.feature_cols = config["feature_cols"]
+        self.target_col = config["target_col"]
+        self.structure_col = config["structure_col"]
+        logger.info("Data processor initialized")
+    
+    def load_data(self, filename: str, sheet_name: str) -> pd.DataFrame:
+        """
+        Load and process Excel data
+        
+        Args:
+            filename: Path to the Excel file
+            sheet_name: Name of the sheet to load
+            
+        Returns:
+            Processed DataFrame
+        """
+        logger.info(f"Processing {sheet_name} data from {filename}")
+        df = pd.read_excel(filename, sheet_name=sheet_name)
+        
+        # Ensure data types are correct
+        numeric_cols = [col for col in self.feature_cols + [self.target_col] 
+                        if col in df.columns]
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Remove rows with NaN in essential columns
+        available_features = [col for col in self.feature_cols if col in df.columns]
+        df = df.dropna(subset=available_features + [self.target_col])
+
+        logger.info(f"Data shape after processing: {df.shape}")
+        logger.info(f"Processed {sheet_name} data points: {len(df)}")
+        
+        return df
+    
+    def get_available_features(self, data: pd.DataFrame) -> List[str]:
+        """
+        Get available features from the configuration list that exist in the data
+        
+        Args:
+            data: DataFrame to check
+            
+        Returns:
+            List of available feature column names
+        """
+        return [col for col in self.feature_cols if col in data.columns]
+    
+    # def prepare_modeling_data(self, data: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series, Optional[pd.Series]]:
+    #     """
+    #     Prepare data for modeling by extracting features and target
+    #     Args:
+    #         data: DataFrame containing the data
+    #     Returns:
+    #         Tuple of (features, target, structures)
+    #     """
+    #     if data is None:
+    #         logger.error("input data is None")
+    #         return None, None, None
+        
+    #     logger.info(f"prepare data and the shape: {data.shape}")
+
+        
+    #     # check if target column exists
+    #     if self.target_col not in data.columns:
+    #         logger.error(f"target col '{self.target_col}' not found in data")
+    #         return None, None, None
+        
+    #     # extract available features
+    #     available_features = self.get_available_features(data)
+        
+    #     # make sure the target column is numeric
+    #     numeric_features = [col for col in available_features 
+    #                     if pd.api.types.is_numeric_dtype(data[col])]
+        
+    #     # detelete the non-numeric features
+    #     data_clean = data.dropna(subset=numeric_features + [self.target_col])
+        
+    #     if len(data_clean) == 0:
+    #         logger.error("No valid data after cleaning")
+    #         return None, None, None
+        
+    #     # extract features and target
+    #     X = data_clean[numeric_features].copy()
+    #     logger.debug(f"feature type preview: {X.dtypes.head()}")
+    #     X = X.apply(pd.to_numeric, errors='coerce')
+    #     # check if there has non-numeric values
+    #     non_numeric_cols = X.select_dtypes(exclude=[np.number]).columns.tolist()
+    #     if non_numeric_cols:
+    #         logger.error(f"Non-numeric columns found: {non_numeric_cols}")
+
+    #     y = data_clean[self.target_col]
+        
+    #     # extract structures and information if available
+    #     if self.structure_col in data_clean.columns:
+    #         structures = data_clean[self.structure_col]
+    #         logger.info(f"structure col '{self.structure_col}' extracted successful, including {len(np.unique(structures))} kinds of structures")
+    #     else:
+    #         logger.warning(f"structure col '{self.structure_col}' not found in the data, available col is: {data_clean.columns.tolist()}")
+    #         structures = None
+        
+    #     return X, y, structures
+
+    def prepare_modeling_data(self, data: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series, Optional[pd.Series]]:
+        """
+        Prepare data for modeling by extracting features and target.
+        Args:
+            data: DataFrame containing the data
+        Returns:
+            Tuple of (features, target, structures)
+        """
+        if data is None:
+            logger.error("input data is None")
+            return None, None, None
+
+        logger.info(f"📊 原始 data shape: {data.shape}")
+        logger.info(f"📌 初始 data.columns: {data.columns.tolist()}")
+        logger.info(f"📌 config['feature_cols']: {self.feature_cols}")
+
+        # 检查目标列是否存在
+        if self.target_col not in data.columns:
+            logger.error(f"❌ Target col '{self.target_col}' not found in data")
+            return None, None, None
+
+        # 确认哪些特征是存在的
+        available_features = self.get_available_features(data)
+        logger.info(f"✅ 存在于 DataFrame 中的 feature_cols: {available_features}")
+
+        # 检查哪些是数值型特征
+        numeric_features = [col for col in available_features if pd.api.types.is_numeric_dtype(data[col])]
+        logger.info(f"🔢 被识别为数值型的特征列: {numeric_features}")
+
+        # 检查缺失值情况
+        missing_matrix = data[numeric_features + [self.target_col]].isna()
+        missing_counts = missing_matrix.sum().to_dict()
+        logger.info(f"❗ 各列的缺失值数量: {missing_counts}")
+
+        # Drop 含缺失值的行
+        data_clean = data.dropna(subset=numeric_features + [self.target_col])
+        logger.info(f"🧹 dropna 之后的行数: {len(data_clean)}（共 {len(data)} 行）")
+
+        if len(data_clean) == 0:
+            logger.error("❌ 清洗后没有任何有效数据行")
+            return None, None, None
+
+        # 提取特征和目标列
+        X = data_clean[numeric_features].copy()
+        logger.info(f"📦 X.columns 最终提取出来的特征列: {X.columns.tolist()}")
+
+        y = data_clean[self.target_col]
+
+        # 提取结构信息（如果存在）
+        if self.structure_col in data_clean.columns:
+            structures = data_clean[self.structure_col]
+            logger.info(f"🏗️ 结构列 '{self.structure_col}' 提取成功，共包含 {len(np.unique(structures))} 类结构")
+        else:
+            logger.warning(f"⚠️ 结构列 '{self.structure_col}' 未找到，当前所有列为: {data_clean.columns.tolist()}")
+            structures = None
+
+        return X, y, structures
+
+    def preprocess_features(self, X_physics):
+        """preprocess features to remove invalid values and features"""
+        bad_columns = []
+
+        # check the NaN
+        nan_cols = X_physics.columns[X_physics.isna().any()].tolist()
+        if nan_cols:
+            logger.warning(f"NaN columns: {nan_cols} will be removed")
+            bad_columns.extend(nan_cols)
+
+        # check the infinite values
+        inf_mask = ~np.isfinite(X_physics.values)
+        inf_cols = X_physics.columns[inf_mask.any(axis=0)].tolist()
+        if inf_cols:
+            logger.warning(f"Infinite columns: {inf_cols} will be removed")
+            bad_columns.extend(inf_cols)
+        
+        # remove bad columns
+        good_columns = [col for col in X_physics.columns if col not in bad_columns]
+        if bad_columns:
+            logger.warning(f"Removing from {len(X_physics.columns)} with {len(bad_columns)} problematic columns")
+        
+        return X_physics[good_columns]
+
+    def create_physics_features_manual(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Create physics-informed features from base descriptors
+        Args:
+            data: DataFrame containing base descriptors
+        Returns:
+            DataFrame with added physics-informed features
+        """
+        features = data.copy()
+        # Check if the required columns are present
+        logger.info("Creating physics-informed features")
+        X = data[self.get_available_features(data)].copy()
+        physics_features = pd.DataFrame(index=X.index)
+        
+        # Metal-oxygen interaction features
+        if all(col in X.columns for col in ['polarons', 'Ce3_dist_min']):
+            physics_features['polaron_proximity'] = X['polarons'] / (X['Ce3_dist_min'] + 0.1)
+            if 'Ce3_dist_sum' in X.columns:
+                physics_features['polaron_density'] = X['polarons'] / (X['Ce3_dist_sum'] + 0.1)
+        
+        # Charge transfer and structural deformation relationship
+        if all(col in X.columns for col in ['Δq', 'RMSD']):
+            physics_features['charge_deformation_ratio'] = X['Δq'] / (X['RMSD'] + 0.01)
+            physics_features['charge_deformation_product'] = X['Δq'] * X['RMSD']
+        
+        # Electronic structure factors
+        if 'ε' in X.columns:
+            if 'Ce3_dist_mean' in X.columns:
+                physics_features['electronic_structure_factor'] = X['ε'] * X['Ce3_dist_mean']
+            if 'polarons' in X.columns:
+                physics_features['polaron_electronic_coupling'] = X['ε'] * X['polarons']
+
+        # Metal-support binding energy related
+        if all(col in X.columns for col in ['Δq', 'polarons']):
+            physics_features['charge_transfer_per_polaron'] = X['Δq'] / (X['polarons'] + 0.1)
+        
+        # Pt-O bond related
+        if 'Pt-O_bonds' in X.columns:
+            physics_features['Pt-O_bond_mean_squared'] = X['Pt-O_bonds'] ** 2
+            #cross with other features
+            if 'polarons' in X.columns:
+                physics_features['Pt-O_bond_polaron_ratio'] = X['Pt-O_bonds'] / (X['polarons'] + 0.1)
+            if 'Ce3_dist_min' in X.columns:
+                physics_features['Pt-O_bond_Ce3_dist_min'] = X['Pt-O_bonds'] * (X['Ce3_dist_min'] + 0.01)
+        
+        # Combine electronic and structural features 
+        if all(col in X.columns for col in ['Δq', 'RMSD', 'polarons']):
+            # Comprehensive descriptor combining charge, structure, and polarons
+            physics_features['charge_structure_polaron_index'] = (X['Δq'] * X['polarons']) / (X['RMSD'] + 0.01)
+        
+        # add combined binding energy descriptors
+        if all(col in X.columns for col in ['RMSD', 'Δq', 'polarons', 'ε']):
+            physics_features['binding_energy_combination'] = X['RMSD'] * X['Δq'] / ( X['polarons'] * X['ε'])
+
+        # add clustering-based features
+        if X.shape[0] >= 30 and X.shape[1] >= 3:
+            try:
+                from sklearn.cluster import KMeans
+                from sklearn.preprocessing import StandardScaler
+                X_scaled = StandardScaler().fit_transform(X.select_dtypes(include=[np.number]))
+                kmeans = KMeans(n_clusters=3, random_state=42,n_init=10)
+                cluster_labels = kmeans.fit_predict(X_scaled)
+                physics_features['cluster_labels'] = cluster_labels
+            except Exception as e:
+                logger.warning(f"KMeans clustering failed: {e}")
+
+        # Combine original and physics features
+        X_physics = pd.concat([X, physics_features], axis=1)
+        logger.info(f"Extended feature set shape: {X_physics.shape}")
+        logger.info(f"New physics features: {physics_features.columns.tolist()}") 
+        return X_physics
+
+    def create_physics_features_smart(self, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
+        """
+        Construct physics-informed features using smart selection + clustering.
+        Parameters taken from config["smart_physical_feature"]
+        """
+        from scipy.stats import pearsonr
+        from sklearn.cluster import AgglomerativeClustering
+        import numpy as np
+
+        smart_config = self.config.get("smart_physical_feature", {})
+        top_n = smart_config.get("top_n", 8)
+        n_clusters = smart_config.get("n_clusters", 3)
+        max_total_features = smart_config.get("max_total_features", 30)
+
+        logger.info("Using SMART physical feature construction (Pearson + Clustering)")
+
+        # Step 1: choose top-N features based on correlation with the target variable
+        scores = []
+        for col in X.columns:
+            try:
+                r, _ = pearsonr(X[col], y)
+                scores.append((col, abs(r)))
+            except:
+                continue
+        top_features = [col for col, _ in sorted(scores, key=lambda x: x[1], reverse=True)[:top_n]]
+        logger.info(f"Top-{top_n} correlated features: {top_features}")
+
+        # Step 2: cluster the top features based on their pairwise correlation
+        corr_matrix = X[top_features].corr().abs()
+        dist_matrix = 1 - corr_matrix
+        clustering = AgglomerativeClustering(n_clusters=n_clusters, metric='precomputed', linkage='average')
+        labels = clustering.fit_predict(dist_matrix)
+        feature_groups = {f: int(l) for f, l in zip(top_features, labels)}
+        logger.info(f"Feature clusters: {feature_groups}")
+
+        # Step 3: combine features from different clusters
+        new_features = pd.DataFrame(index=X.index)
+        combination_count = 0
+
+        for i, f1 in enumerate(top_features):
+            for j, f2 in enumerate(top_features):
+                if i < j and feature_groups[f1] != feature_groups[f2]:
+                    if combination_count + 3 > max_total_features:
+                        logger.warning(f"Reached maximum allowed physical features: {max_total_features}")
+                        break
+                    new_features[f"{f1}_times_{f2}"] = X[f1] * X[f2]
+                    new_features[f"{f1}_over_{f2}"] = X[f1] / (X[f2] + 1e-6)
+                    new_features[f"diff_{f1}_{f2}"] = X[f1] - X[f2]
+                    combination_count += 3
+
+        # combine original features with new features
+        X_combined = pd.concat([X[top_features], new_features], axis=1)
+        logger.info(f"Final SMART physical features: {X_combined.shape[1]} columns created")
+        return X_combined
+
+    def create_physics_features(self, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
+        smart_config = self.config.get("smart_physical_feature", {})
+        use_smart = smart_config.get("use_smart", True)
+        if use_smart:
+            return self.create_physics_features_smart(X, y)
+        else:
+            return self.create_physics_features_manual(X)
+
+    def scale_features(self, X_train: pd.DataFrame, X_test: pd.DataFrame = None, 
+                      method: str = 'standard') -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+        """
+        Scale features using specified method
+        Args:
+            X_train: Training features
+            X_test: Test features (optional)
+            method: Scaling method ('standard', 'robust')
+        Returns:
+            Tuple of (scaled_X_train, scaled_X_test)
+        """
+        X_train = X_train.replace([np.inf, -np.inf], np.nan)
+        if X_test is not None:
+            X_test = X_test.replace([np.inf, -np.inf], np.nan)
+        # Remove rows with NaN in essential columns
+        X_train = X_train.dropna()
+        if X_test is not None:
+            X_test = X_test.dropna()
+        # record in the log
+        bad_cols = X_train.columns[X_train.isna().any()].tolist()
+        if len(bad_cols) > 0:
+            logger.warning(f"NaN columns in training data: {list(bad_cols)}")
+            
+        if method == 'robust':
+            scaler = RobustScaler()
+        else:  # default to standard
+            scaler = StandardScaler()
+            
+        X_train_scaled = pd.DataFrame(
+            scaler.fit_transform(X_train),
+            columns=X_train.columns,
+            index=X_train.index
+        )
+        
+        if X_test is not None:
+            X_test_scaled = pd.DataFrame(
+                scaler.transform(X_test),
+                columns=X_test.columns,
+                index=X_test.index
+            )
+            return X_train_scaled, X_test_scaled, scaler
+        
+        return X_train_scaled, None, scaler
+    

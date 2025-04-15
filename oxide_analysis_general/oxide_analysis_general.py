@@ -7,6 +7,7 @@ evaluation, and visualization.
 """
 
 import numpy as np
+import shutil
 import pandas as pd
 import logging
 import matplotlib.pyplot as plt
@@ -443,6 +444,33 @@ class OxideAnalysis:
             import traceback
             logger.error(traceback.format_exc())
 
+    def _organize_figures(self):
+        """Organize saved figures into baseline/optimized/stacking subfolders"""
+        base_dir = FIGURES_DIR
+        if not base_dir.exists():
+            logger.warning(f"Figure directory {base_dir} not found.")
+            return
+
+        subfolders = ['baseline', 'optimized', 'stacking']
+        for sub in subfolders:
+            (base_dir / sub).mkdir(parents=True, exist_ok=True)
+
+        for file in base_dir.glob("*.*"):
+            if file.suffix.lower() not in [".png", ".svg"]:
+                continue
+
+            fname = file.name.lower()
+            moved = False
+            for sub in subfolders:
+                if sub in fname:
+                    shutil.move(str(file), str(base_dir / sub / file.name))
+                    logger.info(f"Moved {file.name} -> {sub}/")
+                    moved = True
+                    break
+
+            if not moved:
+                logger.debug(f"Kept {file.name} in figures/ (not baseline/optimized/stacking)")
+
     def run_analysis(self, data_file: str) -> Dict:
         """run the complete analysis workflow"""
         logger.info(f"Starting analysis with {data_file}")
@@ -504,5 +532,5 @@ class OxideAnalysis:
                                 logger.info(f"Parameters: {model.get_params()}")
         
         logger.info("Analysis completed!")
-        # self._log_model_performance(results)
+        self._organize_figures()
         return results

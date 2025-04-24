@@ -27,14 +27,13 @@ from sklearn.linear_model import Ridge
 from .data_processor import DataProcessor
 from .model_trainer import ModelTrainer
 from .visualizer import Visualizer
-from .config import DEFAULT_CONFIG, COLORS, MARKERS, FIGURES_DIR, ANALYSIS_DIR, PARAM_GRIDS
+from .config import DEFAULT_CONFIG, COLORS, MARKERS, FIGURES_DIR, ANALYSIS_DIR, PARAM_GRIDS, ACTIVE_CLUSTERS
 
 # Configure logger
 logger = logging.getLogger(__name__)
 
 class OxideAnalysis:
     """Main class for oxide descriptor analysis workflow"""
-    
     def __init__(self, config: Dict = None):
         """
         Initialize the analysis workflow
@@ -47,39 +46,57 @@ class OxideAnalysis:
         self.data_processor = DataProcessor(self.config)
         self.model_trainer = ModelTrainer(self.config)
         self.visualizer = Visualizer(self.config)
+        self.config['ACTIVE_CLUSTERS'] = ACTIVE_CLUSTERS
         logger.info("Oxide analysis initialized with configuration")
     
     def _load_data(self, data_file):
         """load data from file"""
-        pt07_data = self.data_processor.load_data(data_file, 'Pt07')
-        pt13_data = self.data_processor.load_data(data_file, 'Pt13')
-        combined_data = self.data_processor.load_data(data_file, 'combine')
-        return pt07_data, pt13_data, combined_data
+        data_dict = {}
+        
+        if 'Pt07' in ACTIVE_CLUSTERS:
+            data_dict['Pt07'] = self.data_processor.load_data(data_file, 'Pt07')
+        else:
+            data_dict['Pt07'] = pd.DataFrame()
+            
+        if 'Pt13' in ACTIVE_CLUSTERS:
+            data_dict['Pt13'] = self.data_processor.load_data(data_file, 'Pt13')
+        else:
+            data_dict['Pt13'] = pd.DataFrame()
+            
+        if 'combined' in ACTIVE_CLUSTERS:
+            data_dict['combined'] = self.data_processor.load_data(data_file, 'combine')
+        else:
+            data_dict['combined'] = pd.DataFrame()
+            
+        return data_dict['Pt07'], data_dict['Pt13'], data_dict['combined']
 
     def _prepare_all_modeling_data(self, pt07_data, pt13_data, combined_data):
         """prepare all modeling data"""
+        modeling_data = {}
+        
+        if 'Pt07' in ACTIVE_CLUSTERS and not pt07_data.empty:
+            X_pt07_raw, y_pt07, structures_pt07 = self.data_processor.prepare_modeling_data(pt07_data)
+            if X_pt07_raw is not None:
+                X_pt07_physics = self.data_processor.create_physics_features(X_pt07_raw, y_pt07)
+                X_pt07_scaled, _, pt07_scaler = self.data_processor.scale_features(X_pt07_physics, method='robust')
+                modeling_data['Pt07'] = (X_pt07_raw,X_pt07_physics, X_pt07_scaled, y_pt07, structures_pt07)
+        
+        if 'Pt13' in ACTIVE_CLUSTERS and not pt13_data.empty:
+            X_pt13_raw, y_pt13, structures_pt13 = self.data_processor.prepare_modeling_data(pt13_data)
+            if X_pt13_raw is not None:
+                X_pt13_physics = self.data_processor.create_physics_features(X_pt13_raw, y_pt13)
+                X_pt13_scaled, _, pt13_scaler = self.data_processor.scale_features(X_pt13_physics, method='robust')
+                modeling_data['Pt13'] = (X_pt13_raw, X_pt13_physics, X_pt13_scaled, y_pt13, structures_pt13)
+        
+        if 'combined' in ACTIVE_CLUSTERS and not combined_data.empty:
+            X_combined_raw, y_combined, structures_combined = self.data_processor.prepare_modeling_data(combined_data)
+            if X_combined_raw is not None:
+                X_combined_physics = self.data_processor.create_physics_features(X_combined_raw, y_combined)
+                X_combined_scaled, _, combined_scaler = self.data_processor.scale_features(X_combined_physics, method='robust')
+                modeling_data['combined'] = (X_combined_raw, X_combined_physics, X_combined_scaled, y_combined, structures_combined)
+        
+        return modeling_data
 
-        # prepare Pt07
-        X_pt07_raw, y_pt07, structures_pt07 = self.data_processor.prepare_modeling_data(pt07_data)
-        X_pt07_physics = self.data_processor.create_physics_features(X_pt07_raw, y_pt07)
-        X_pt07_scaled, _, pt07_scaler = self.data_processor.scale_features(X_pt07_physics, method='robust')
-
-        # prepare Pt13
-        X_pt13_raw, y_pt13, structures_pt13 = self.data_processor.prepare_modeling_data(pt13_data)
-        X_pt13_physics = self.data_processor.create_physics_features(X_pt13_raw, y_pt13)
-        X_pt13_scaled, _, pt13_scaler = self.data_processor.scale_features(X_pt13_physics, method='robust')
-
-        # prepare combined
-        X_combined_raw, y_combined, structures_combined = self.data_processor.prepare_modeling_data(combined_data)
-        X_combined_physics = self.data_processor.create_physics_features(X_combined_raw, y_combined)
-        X_combined_scaled, _, combined_scaler = self.data_processor.scale_features(X_combined_physics, method='robust')
-
-        return {
-            'Pt07': (X_pt07_raw, X_pt07_physics, X_pt07_scaled, y_pt07, structures_pt07),
-            'Pt13': (X_pt13_raw, X_pt13_physics, X_pt13_scaled, y_pt13, structures_pt13),
-            'combined': (X_combined_raw, X_combined_physics, X_combined_scaled, y_combined, structures_combined)
-        }
-    
     def _split_data(self, X, y, structures, test_size=0.15, random_state=42):
         """Split data into training and testing sets"""
         return train_test_split(X, y, structures, test_size=0.15, random_state=self.config['random_state']) 
@@ -210,34 +227,6 @@ class OxideAnalysis:
                 'r2': best_r2,
                 'metrics': model_results[best_model_name]['test_metrics']}
       
-    def _evaluate_by_cluster(self, model, X_test, y_test, cluster_test):
-        """evaluate the model by cluster"""
-        performance = {}
-        
-        # 获取预测值
-        test_pred = model.predict(X_test)
-        
-        # 评估 Pt07 性能
-        pt07_mask = cluster_test == 'Pt07'
-        if sum(pt07_mask) > 0:
-            pt07_metrics = self.model_trainer._calculate_metric(y_test[pt07_mask], test_pred[pt07_mask])
-            performance['Pt07'] = pt07_metrics
-        
-        # 评估 Pt13 性能
-        pt13_mask = cluster_test == 'Pt13'
-        if sum(pt13_mask) > 0:
-            pt13_metrics = self.model_trainer._calculate_metric(y_test[pt13_mask], test_pred[pt13_mask])
-            performance['Pt13'] = pt13_metrics
-        
-        # 评估组合性能
-        combined_mask = cluster_test == 'combine'
-        if sum(combined_mask) > 0:
-            combined_metrics = self.model_trainer._calculate_metric(y_test[combined_mask], test_pred[combined_mask])
-            performance['combined'] = combined_metrics
-
-
-        return performance
-
     def _analyze_cluster(self, X_raw, X_physics, X_scaled, y, structures, cluster_name):
         """
         Analyze a single cluster: (all need to do hyperparameter tuning fisrt training)
@@ -472,53 +461,58 @@ class OxideAnalysis:
                 logger.debug(f"Kept {file.name} in figures/ (not baseline/optimized/stacking)")
 
     def run_analysis(self, data_file: str) -> Dict:
-        """run the complete analysis workflow"""
+        """Run the complete analysis workflow"""
         logger.info(f"Starting analysis with {data_file}")
         
-        # load and prepare data
-        pt07_data, pt13_data, combined_data = self._load_data(data_file)    # visualize the data
-        # create correlation visualizations
-        self.visualizer.plot_pearson_correlation(pt07_data, 'Pt07')
-        self.visualizer.plot_pearson_correlation(pt13_data, 'Pt13')
-        self.visualizer.plot_pearson_correlation(combined_data, 'combined')
-        # prepare modeling data
+        # Load and prepare data
+        pt07_data, pt13_data, combined_data = self._load_data(data_file)
+        
+        # Create correlation visualizations for all available clusters
+        data_map = {
+            'Pt07': pt07_data,
+            'Pt13': pt13_data,
+            'combined': combined_data
+        }
+        for cluster_name in ACTIVE_CLUSTERS:
+            if cluster_name in data_map and not data_map[cluster_name].empty:
+                self.visualizer.plot_pearson_correlation(data_map[cluster_name], cluster_name)
+        
+        # Prepare modeling data
         modeling_data = self._prepare_all_modeling_data(pt07_data, pt13_data, combined_data)
 
-        # run the complete buliding and training process for all the clusters
+        # Run the complete building and training process for active clusters
         results = {}
-        for name in ['Pt07', 'Pt13', 'combined']:
-            logger.info(f"starting the complete training analysis for {name} cluster...")
-            cluster_results = self._analyze_cluster(
-                *modeling_data[name], name)
-            results[name] = cluster_results
+        for name in ACTIVE_CLUSTERS:
+            if name in modeling_data:
+                logger.info(f"Starting the complete training analysis for {name} cluster...")
+                cluster_results = self._analyze_cluster(
+                    *modeling_data[name], cluster_name=name)
+                results[name] = cluster_results
+                # cluster_results = self._analyze_cluster(
+                ####     *modeling_data[name], name)
+                # results[name] = cluster_results
+            else:
+                logger.warning(f"Cluster {name} not found in modeling data")
 
-        # creat comparison visualizations
-        self.visualizer.create_comparison_visualizations(
-            pt07_data, pt13_data,combined_data,
-            results['Pt07'], results['Pt13'], results['combined']
-        )
+        # Prepare arguments for comparison visualization
+        cluster_args = {}
+        for cluster in ['Pt07', 'Pt13', 'combined']:
+            if cluster in ACTIVE_CLUSTERS:
+                cluster_args[f'{cluster.lower()}_data'] = data_map[cluster]
+                cluster_args[f'{cluster.lower()}_results'] = results.get(cluster, {})
+            else:
+                cluster_args[f'{cluster.lower()}_data'] = pd.DataFrame()
+                cluster_args[f'{cluster.lower()}_results'] = {}
         
-        # save results
-        results = {
-            'Pt07': results['Pt07'],
-            'Pt13': results['Pt13'],
-            'combined': results['combined']
-        }
+        # Create comparison visualizations
+        self.visualizer.create_comparison_visualizations(**cluster_args)
+        
+        # Save results (only for active clusters)
+        filtered_results = {cluster: results.get(cluster, {}) for cluster in ACTIVE_CLUSTERS}
+        self._save_results(filtered_results)
 
-        # check if the results are in the correct format
-        if not isinstance(results, dict):
-            logger.error(f"results is not a dictionary, it is {type(results)}")
-            results = {
-                'Pt07': results['Pt07'] if isinstance(results['Pt07'], dict) else {},
-                'Pt13': results['Pt13'] if isinstance(results['Pt07'], dict) else {},
-                'combined': results['combined'] if isinstance(results['combined'], dict) else {}
-            }
-
-        # save the results
-        self._save_results(results)
-
-        #check all performaces of the models
-        for dataset_name, dataset_result in results.items():
+        # Check all performances of the models
+        for dataset_name, dataset_result in filtered_results.items():
             logger.info(f"==== Performance Summary for {dataset_name} ====")
             if 'models' in dataset_result:
                 for model_name, model in dataset_result['models'].items():
@@ -526,11 +520,14 @@ class OxideAnalysis:
                         score = dataset_result['scores'][model_name]
                         if 'R²' in score:
                             logger.info(f"Model: {model_name}, R²: {score['R²']:.4f}")
-                            # check the best model
+                            # Check for high-performance models
                             if score['R²'] > 0.85:
                                 logger.info(f"HIGH PERFORMANCE MODEL FOUND: {dataset_name}/{model_name}")
                                 logger.info(f"Parameters: {model.get_params()}")
         
         logger.info("Analysis completed!")
         self._organize_figures()
-        return results
+        return filtered_results
+    
+
+

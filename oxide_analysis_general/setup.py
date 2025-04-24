@@ -17,7 +17,10 @@ setup(
         "tqdm>=4.60",
         "openpyxl>=3.0",
         "scipy>=1.7",
-        "scikit-optimize>=0.9"
+        "scikit-optimize>=0.9",
+        "scikit-learn>=1.3,<1.4",
+        "xgboost>=1.7,<2.0",
+        "scikit-optimize>=0.9,<0.10",
     ],
     python_requires='>=3.8',
     entry_points={

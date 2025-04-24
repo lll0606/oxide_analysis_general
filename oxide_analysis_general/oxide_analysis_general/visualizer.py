@@ -17,7 +17,7 @@ from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
 
 # Import from local config
-from .config import DEFAULT_CONFIG, COLORS, MARKERS, FIGURES_DIR, ANALYSIS_DIR, PARAM_GRIDS
+from .config import DEFAULT_CONFIG, COLORS, MARKERS, FIGURES_DIR, ANALYSIS_DIR, PARAM_GRIDS, FEATURE_NAME_MAP
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -35,6 +35,11 @@ class Visualizer:
         self.set_plot_style()
         logger.info("Visualizer initialized")
     
+    def _map_feature_names(self, feature_names: List[str]) -> List[str]:
+        """Map raw feature names to standardized display names using FEATURE_NAME_MAP"""
+        name_map = self.config.get("FEATURE_NAME_MAP", {})
+        return [name_map.get(name, name) for name in feature_names]
+
     def set_plot_style(self):
         """Set the default plot style"""
         plt.style.use('default')
@@ -85,7 +90,7 @@ class Visualizer:
         logger.info(f"Creating Pearson correlation heatmap for {cluster_name}")
 
         target_col = self.config["target_col"]
-        physical_feature_prefixes = ['_over_', '_times_', 'diff_', 'inv_']
+        physical_feature_prefixes = ['_/_', '_x_', 'diff(-)', 'inv_']
 
         # Decide which features to use
         if "physical" in cluster_name.lower():
@@ -139,7 +144,7 @@ class Visualizer:
         from scipy.stats import pearsonr
 
         target_col = self.config["target_col"]
-        physical_feature_prefixes = ['_over_', '_times_', 'diff_', 'inv_']
+        physical_feature_prefixes = ['_/_', '_x_', '-', 'inv_']
 
         if "physical" in cluster_name.lower():
             # 识别物理特征 + 原始特征
@@ -390,7 +395,8 @@ class Visualizer:
 
         importances = model.coef_
         plt.figure(figsize=(8, 6))
-        plt.barh(feature_names, importances)
+        mapped_names = self._map_feature_names(feature_names)
+        plt.barh(mapped_names, importances)
         plt.xlabel("Coefficient Weight", fontsize=14)
         plt.title(f"{cluster_name} {model_type} meta-model coefficient", fontsize=16)
         plt.grid(True, axis='x', linestyle='--', alpha=0.5)
@@ -722,168 +728,150 @@ class Visualizer:
                     save_path=save_path
                 )
 
-
-    def create_comparison_visualizations(self, pt07_data: pd.DataFrame, pt13_data: pd.DataFrame, combined_data: pd.DataFrame,
-                                        pt07_results: Dict, pt13_results: Dict, combined_results: Dict) -> None:
+    def create_comparison_visualizations(self, pt07_data: pd.DataFrame = pd.DataFrame(), 
+                                        pt13_data: pd.DataFrame = pd.DataFrame(), 
+                                        combined_data: pd.DataFrame = pd.DataFrame(),
+                                        pt07_results: Dict = {}, 
+                                        pt13_results: Dict = {}, 
+                                        combined_results: Dict = {}) -> None:
         """
         Create visualizations comparing different aspects of the analysis
         Args:
-            pt07_data, pt13_data: Raw data DataFrames
-            pt07_results, pt13_results: Results dictionaries
-            combined_results: Combined analysis results
+            pt07_data, pt13_data, combined_data: Raw data DataFrames
+            pt07_results, pt13_results, combined_results: Results dictionaries
         """
+        # Identify which clusters have valid data
+        active_clusters = []
+        if not pt07_data.empty and pt07_results:
+            active_clusters.append('Pt07')
+        if not pt13_data.empty and pt13_results:
+            active_clusters.append('Pt13')
+        if not combined_data.empty and combined_results:
+            active_clusters.append('combined')
+        
+        if not active_clusters:
+            logger.warning("No valid data available for comparison visualization")
+            return
+        
         # 1. RMSD vs Charge with ΔEads contour plot
-        if all(col in pt07_data.columns for col in ['RMSD', 'Δq', 'ΔEads']) and \
-           all(col in pt13_data.columns for col in ['RMSD', 'Δq', 'ΔEads']) and \
-           all(col in combined_data.columns for col in ['RMSD', 'Δq', 'ΔEads']):
-            
-            # Extract data
-            pt07_rmsd = pt07_data['RMSD'].values
-            pt07_charge = pt07_data['Δq'].values
-            pt07_eads = pt07_data['ΔEads'].values
-            pt07_structs = pt07_data['structure'].values
-            
-            pt13_rmsd = pt13_data['RMSD'].values
-            pt13_charge = pt13_data['Δq'].values
-            pt13_eads = pt13_data['ΔEads'].values
-            pt13_structs = pt13_data['structure'].values
-
-            combined_rmsd = combined_data['RMSD'].values
-            combined_charge = combined_data['Δq'].values
-            combined_eads = combined_data['ΔEads'].values
-            combined_structs = combined_data['structure'].values
-            
-            # Combine data for contour plot
-            all_rmsd = np.concatenate([pt07_rmsd, pt13_rmsd, combined_rmsd])
-            all_charge = np.concatenate([pt07_charge, pt13_charge, combined_charge])
-            all_eads = np.concatenate([pt07_eads, pt13_eads, combined_eads])
-            
-            # Create custom structure labels with cluster prefix
-            pt07_structs_labeled = np.array([f'Pt07-{s}' for s in pt07_structs])
-            pt13_structs_labeled = np.array([f'Pt13-{s}' for s in pt13_structs])
-            combined_structs_labeled = np.array([f'combined-{s}' for s in combined_structs])
-            all_structs = np.concatenate([pt07_structs_labeled, pt13_structs_labeled, combined_structs_labeled])
-            
-            # Create contour plot
-            save_path = self.get_figure_save_path(
-             cluster_name='combined',
-            stage=None,
-            model_type=None,
-            plot_type='contour_summary',
-            fmt='png'
-            )
-            # combined
-            self.plot_scatter_contour(
-                x_data=all_charge,
-                y_data=all_rmsd,
-                z_data=all_eads,
-                structures=all_structs,
-                cluster_name='combined',
-                xlabel='Δq (e-)',
-                ylabel='RMSD (Å)',
-                zlabel='ΔEads (eV)',
-                title='Δq vs RMSD with ΔEads (Combined)',
-                save_path=save_path
+        data_map = {
+            'Pt07': pt07_data,
+            'Pt13': pt13_data,
+            'combined': combined_data
+        }
+        
+        results_map = {
+            'Pt07': pt07_results,
+            'Pt13': pt13_results,
+            'combined': combined_results
+        }
+        
+        # Check if required columns exist in active clusters
+        valid_contour_clusters = []
+        for cluster in active_clusters:
+            data = data_map[cluster]
+            if all(col in data.columns for col in ['RMSD', 'Δq', 'ΔEads', 'structure']):
+                valid_contour_clusters.append(cluster)
+        
+        if valid_contour_clusters:
+            # Extract and prepare data for individual contour plots
+            for cluster in valid_contour_clusters:
+                data = data_map[cluster]
+                rmsd = data['RMSD'].values
+                charge = data['Δq'].values
+                eads = data['ΔEads'].values
+                structs = data['structure'].values
+                
+                # Create individual contour plot
+                self.plot_scatter_contour(
+                    x_data=charge,
+                    y_data=rmsd,
+                    z_data=eads,
+                    structures=structs,
+                    cluster_name=cluster,
+                    xlabel='Δq (e-)',
+                    ylabel='RMSD (Å)',
+                    zlabel='ΔEads (eV)',
+                    title=f'Δq vs RMSD with ΔEads ({cluster})',
+                    save_path=self.get_figure_save_path(
+                        cluster_name=cluster,
+                        stage='summary',
+                        model_type=None,
+                        plot_type='contour',
+                        fmt='png'
+                    )
                 )
-            # Pt07
-            self.plot_scatter_contour(
-                x_data=pt07_charge,
-                y_data=pt07_rmsd,
-                z_data=pt07_eads,
-                structures=pt07_structs,
-                cluster_name='Pt07',
-                xlabel='Δq (e-)',
-                ylabel='RMSD (Å)',
-                zlabel='ΔEads (eV)',
-                title='Δq vs RMSD with ΔEads (Pt07)',
-                save_path=self.get_figure_save_path(
-                    cluster_name='Pt07',
-                    stage='summary',
+                logger.info(f"Contour plot created for {cluster}")
+            
+            # Create combined contour plot if multiple clusters are active
+            if len(valid_contour_clusters) > 1:
+                all_rmsd = []
+                all_charge = []
+                all_eads = []
+                all_structs = []
+                
+                for cluster in valid_contour_clusters:
+                    data = data_map[cluster]
+                    all_rmsd.append(data['RMSD'].values)
+                    all_charge.append(data['Δq'].values)
+                    all_eads.append(data['ΔEads'].values)
+                    labeled_structs = np.array([f'{cluster}-{s}' for s in data['structure'].values])
+                    all_structs.append(labeled_structs)
+                
+                # Combine data for contour plot
+                combined_rmsd = np.concatenate(all_rmsd)
+                combined_charge = np.concatenate(all_charge)
+                combined_eads = np.concatenate(all_eads)
+                combined_structs = np.concatenate(all_structs)
+                
+                # Create contour plot
+                save_path = self.get_figure_save_path(
+                    cluster_name='combined_comparison',
+                    stage=None,
                     model_type=None,
-                    plot_type='contour',
+                    plot_type='contour_summary',
                     fmt='png'
                 )
-            )
-            # Pt13
-            self.plot_scatter_contour(
-                x_data=pt13_charge,
-                y_data=pt13_rmsd,
-                z_data=pt13_eads,
-                structures=pt13_structs,
-                cluster_name='Pt13',
-                xlabel='Δq (e-)',
-                ylabel='RMSD (Å)',
-                zlabel='ΔEads (eV)',
-                title='Δq vs RMSD with ΔEads (Pt13)',
-                save_path=self.get_figure_save_path(
-                    cluster_name='Pt13',
-                    stage='summary',
-                    model_type=None,
-                    plot_type='contour',
-                    fmt='png'
+                
+                self.plot_scatter_contour(
+                    x_data=combined_charge,
+                    y_data=combined_rmsd,
+                    z_data=combined_eads,
+                    structures=combined_structs,
+                    cluster_name='combined_comparison',
+                    xlabel='Δq (e-)',
+                    ylabel='RMSD (Å)',
+                    zlabel='ΔEads (eV)',
+                    title='Δq vs RMSD with ΔEads (Combined Comparison)',
+                    save_path=save_path
                 )
-            )
-            logger.info("Contour plots created for RMSD vs Charge with ΔEads")
+                logger.info("Combined contour plot created for comparison")
 
         # 2. Model performance comparison across clusters
-        #check if all the metrics are present
-        if 'metrics' in pt07_results and 'metrics' in pt13_results and 'metrics' in combined_results:
+        # Check if metrics are present in active clusters
+        valid_metrics_clusters = []
+        for cluster in active_clusters:
+            if 'metrics' in results_map[cluster]:
+                valid_metrics_clusters.append(cluster)
+        
+        if valid_metrics_clusters:
             # Initialize lists to collect data for the DataFrame
             models = []
             datasets = []
             r2_values = []
             rmse_values = []
             
-            # Get PT07 metrics if available
-            if 'Random Forest' in pt07_results['metrics']:
-                models.append('Random Forest')
-                datasets.append('Pt07')
-                r2_values.append(pt07_results['metrics']['Random Forest'].get('R²', np.nan))
-                rmse_values.append(pt07_results['metrics']['Random Forest'].get('RMSE', np.nan))
-            
-            if 'Gradient Boosting' in pt07_results['metrics']:
-                models.append('Gradient Boosting')
-                datasets.append('Pt07')
-                r2_values.append(pt07_results['metrics']['Gradient Boosting'].get('R²', np.nan))
-                rmse_values.append(pt07_results['metrics']['Gradient Boosting'].get('RMSE', np.nan))
-            
-            if 'Domain-Aware Ensemble' in pt07_results['metrics']:
-                models.append('Domain-Aware Ensemble')
-                datasets.append('Pt07')
-                r2_values.append(pt07_results['metrics']['Domain-Aware Ensemble'].get('R²', np.nan))
-                rmse_values.append(pt07_results['metrics']['Domain-Aware Ensemble'].get('RMSE', np.nan))
-            
-            # Get PT13 metrics if available
-            if 'Random Forest' in pt13_results['metrics']:
-                models.append('Random Forest')
-                datasets.append('Pt13')
-                r2_values.append(pt13_results['metrics']['Random Forest'].get('R²', np.nan))
-                rmse_values.append(pt13_results['metrics']['Random Forest'].get('RMSE', np.nan))
-            
-            if 'Gradient Boosting' in pt13_results['metrics']:
-                models.append('Gradient Boosting')
-                datasets.append('Pt13')
-                r2_values.append(pt13_results['metrics']['Gradient Boosting'].get('R²', np.nan))
-                rmse_values.append(pt13_results['metrics']['Gradient Boosting'].get('RMSE', np.nan))
-            
-            if 'Domain-Aware Ensemble' in pt13_results['metrics']:
-                models.append('Domain-Aware Ensemble')
-                datasets.append('Pt13')
-                r2_values.append(pt13_results['metrics']['Domain-Aware Ensemble'].get('R²', np.nan))
-                rmse_values.append(pt13_results['metrics']['Domain-Aware Ensemble'].get('RMSE', np.nan))
-            
-            # Get Combined metrics if available
-            if 'Random Forest' in combined_results['metrics']:
-                models.append('Random Forest')
-                datasets.append('combined')
-                r2_values.append(combined_results['metrics']['Random Forest'].get('R²', np.nan))
-                rmse_values.append(combined_results['metrics']['Random Forest'].get('RMSE', np.nan))
-            
-            if 'Gradient Boosting' in combined_results['metrics']:
-                models.append('Gradient Boosting')
-                datasets.append('combined')
-                r2_values.append(combined_results['metrics']['Gradient Boosting'].get('R²', np.nan))
-                rmse_values.append(combined_results['metrics']['Gradient Boosting'].get('RMSE', np.nan))
+            # Collect metrics from each active cluster
+            for cluster in valid_metrics_clusters:
+                result = results_map[cluster]
+                metrics = result['metrics']
+                
+                for model_name in metrics:
+                    if isinstance(metrics[model_name], dict) and 'R²' in metrics[model_name] and 'RMSE' in metrics[model_name]:
+                        models.append(model_name)
+                        datasets.append(cluster)
+                        r2_values.append(metrics[model_name].get('R²', np.nan))
+                        rmse_values.append(metrics[model_name].get('RMSE', np.nan))
             
             # Create DataFrame only with available metrics
             if models:
@@ -907,7 +895,7 @@ class Visualizer:
                     plt.ylim(0, 1)
                     plt.legend(title='Dataset')
                     plt.tight_layout()
-                    base_path = FIGURES_DIR / f"model_r2_comparison"
+                    base_path = FIGURES_DIR / "model_r2_comparison"
                     for fmt in self.config.get("fig_formats", ["png"]):
                         full_path = base_path.with_suffix(f'.{fmt}')
                         plt.savefig(full_path, dpi=self.config["dpi"], transparent=True)
@@ -922,7 +910,7 @@ class Visualizer:
                     plt.ylabel('RMSE (eV)', fontsize=14)
                     plt.legend(title='Dataset')
                     plt.tight_layout()
-                    base_path= FIGURES_DIR / f"model_rmse_comparison"
+                    base_path = FIGURES_DIR / "model_rmse_comparison"
                     for fmt in self.config.get("fig_formats", ["png"]):
                         full_path = base_path.with_suffix(f'.{fmt}')
                         plt.savefig(full_path, dpi=self.config["dpi"], transparent=True)
@@ -963,10 +951,11 @@ class Visualizer:
         indices = np.argsort(importances)[::-1]
 
         #plot
-        plt.figure(figsize=(12, 8))
+        plt.figure(figsize=(16, 8))
         plt.title(f"{cluster_name} {model_type} feature importance", fontsize=16)
         plt.bar(range(len(feature_names)), importances[indices], align='center')
-        plt.xticks(range(len(feature_names)), [feature_names[i] for i in indices], 
+        mapped_names = self._map_feature_names(feature_names)
+        plt.xticks(range(len(mapped_names)), [mapped_names[i] for i in indices], 
                   rotation=45, ha='right')
         plt.tight_layout()
         

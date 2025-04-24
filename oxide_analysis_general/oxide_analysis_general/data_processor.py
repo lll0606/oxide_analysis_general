@@ -313,9 +313,17 @@ class DataProcessor:
         # Step 2: cluster the top features based on their pairwise correlation
         corr_matrix = X[top_features].corr().abs()
         dist_matrix = 1 - corr_matrix
-        clustering = AgglomerativeClustering(n_clusters=n_clusters, metric='precomputed', linkage='average')
-        labels = clustering.fit_predict(dist_matrix)
-        feature_groups = {f: int(l) for f, l in zip(top_features, labels)}
+        # get the number of features
+        n_features = dist_matrix.shape[0]
+        n_clusters_safe = min(n_clusters, n_features)
+        # if the feature number is too small,then skip the cluster just use the original features
+        if n_clusters_safe < 2:
+            logger.warning(f"[create_physics_features_smart] Not enough features {n_features} to cluster, using original features")
+            feature_groups = {f: 0 for f in top_features}
+        else:
+            clustering = AgglomerativeClustering(n_clusters=n_clusters_safe, metric='precomputed', linkage='average')
+            labels = clustering.fit_predict(dist_matrix)
+            feature_groups = {f: int(l) for f, l in zip(top_features, labels)}
         logger.info(f"Feature clusters: {feature_groups}")
 
         # Step 3: combine features from different clusters
@@ -328,9 +336,9 @@ class DataProcessor:
                     if combination_count + 3 > max_total_features:
                         logger.warning(f"Reached maximum allowed physical features: {max_total_features}")
                         break
-                    new_features[f"{f1}_times_{f2}"] = X[f1] * X[f2]
-                    new_features[f"{f1}_over_{f2}"] = X[f1] / (X[f2] + 1e-6)
-                    new_features[f"diff_{f1}_{f2}"] = X[f1] - X[f2]
+                    new_features[f"{f1}x{f2}"] = X[f1] * X[f2]
+                    new_features[f"{f1}/{f2}"] = X[f1] / (X[f2] + 1e-6)
+                    new_features[f"{f1}-{f2}"] = X[f1] - X[f2]
                     combination_count += 3
 
         # combine original features with new features

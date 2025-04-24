@@ -44,6 +44,8 @@ COLORS = {
     'combined':{'3d': '#4497c4', 'quasi': '#68be93', 'bj': '#68be93', '2l': '#ffce3f', 'rod': '#f4ae6f', 'flat': '#f28e8e'}
 }
 
+ACTIVE_CLUSTERS = ['combined']
+
 # Marker styles for different structures
 MARKERS = {
     '3d': 'o',        # Circle
@@ -57,7 +59,8 @@ MARKERS = {
 # Default configuration
 DEFAULT_CONFIG = {
     "feature_cols": [
-        'RMSD', 'Δq', 'polarons', 'ε', 
+        'RMSD', 'Δq', 
+        'polarons', 'ε', 
         'Ce3_dist_sum', 'Ce3_dist_min', 'Ce3_dist_mean', 
         'Ce3_dist_max', 'Ce3_dist_std', 'E_pol-pol', 'E_pol-lattice',
         'Pt-O_bonds', 'Pt-O_dist_sum', 'Pt-O_dist_min', 'Pt-O_dist_mean', 
@@ -92,50 +95,72 @@ DEFAULT_CONFIG = {
     }
 }
 
+FEATURE_NAME_MAP = {
+    'Δq': 'Δq',
+    'RMSD': 'RMSD'
+    ,
+    'polarons': 'Polaron count',
+    'ε': 'ε',
+    'Ce3_dist_sum': 'Σ(Ce³⁺-Ce³⁺ dist)',
+    'Ce3_dist_min': 'Min(Ce³⁺-Ce³⁺ dist)',
+    'Ce3_dist_mean': 'Mean(Ce³⁺-Ce³⁺ dist)',
+    'Ce3_dist_max': 'Max(Ce³⁺-Ce³⁺ dist)',
+    'Ce3_dist_std': 'Std(Ce³⁺-Ce³⁺ dist)',
+    'E_pol-pol': 'Epol-pol',
+    'E_pol-lattice': 'Epol-lattice',
+    'Pt-O_bonds': 'Pt-O bond count',
+    'Pt-O_dist_sum': 'Σ(Pt-O dist)',
+    'Pt-O_dist_min': 'Min(Pt-O dist)',
+    'Pt-O_dist_mean': 'Mean(Pt-O dist)',
+    'Pt-O_dist_max': 'Max(Pt-O dist)',
+    'Pt-O_dist_std': 'Std(Pt-O dist)',
+    'Ov concentration(%)': 'O vacancy (%)'
+}
+
 # set param_grids
 # config.py
 from skopt.space import Integer, Real
-PARAM_GRIDS = {
-    'rf': {
-        'n_estimators': list(range(10, 300, 100)),  
-        'max_depth': list(range(1, 16, 5)),
-        'max_features': [round(x, 2) for x in np.linspace(0.05, 1.0, 2)]
-    },
-    'gb': {
-        'n_estimators': list(range(50, 301, 100)),
-        'max_depth': list(range(2, 11, 4)),
-        'learning_rate': [0.01, 0.05]
-    },
-    'xgb': {
-        'n_estimators': list(range(50, 301, 100)),
-        'max_depth': list(range(2, 11, 4)),
-        'learning_rate': [0.01, 0.05],
-        'subsample': [0.5, 0.75, 1.0],
-        'colsample_bytree': [0.5, 0.75, 1.0]
-    },
-
-}
 
 # PARAM_GRIDS = {
 #     'rf': {
-#         'n_estimators': list(range(10, 310, 10)),  
-#         'max_depth': list(range(1, 16)),
-#         'max_features': [round(x, 2) for x in np.linspace(0.05, 1.0, 20)]
+#         'n_estimators': list(range(10, 310, 50)),  
+#         'max_depth': list(range(1, 3)),
+#         'max_features': [round(x, 2) for x in np.linspace(0.05, 1.0, 2)]
 #     },
 #     'gb': {
-#         'n_estimators': list(range(50, 301, 50)),
-#         'max_depth': list(range(2, 11)),
+#         'n_estimators': list(range(50, 301, 150)),
+#         'max_depth': list(range(2, 11,5)),
 #         'learning_rate': [0.01, 0.05, 0.1, 0.2]
 #     },
 #     'xgb': {
-#         'n_estimators': list(range(50, 301, 50)),
-#         'max_depth': list(range(2, 11)),
+#         'n_estimators': list(range(50, 301, 150)),
+#         'max_depth': list(range(2, 11,5)),
 #         'learning_rate': [0.01, 0.05, 0.1, 0.2],
 #         'subsample': [0.5, 0.75, 1.0],
 #         'colsample_bytree': [0.5, 0.75, 1.0]
 #     },
 
 # }
+PARAM_GRIDS = {
+    'rf': {
+        'n_estimators': list(range(10, 310, 10)),  
+        'max_depth': list(range(1, 16)),
+        'max_features': [round(x, 2) for x in np.linspace(0.05, 1.0, 20)]
+    },
+    'gb': {
+        'n_estimators': list(range(50, 301, 50)),
+        'max_depth': list(range(2, 11)),
+        'learning_rate': [0.01, 0.05, 0.1, 0.2]
+    },
+    'xgb': {
+        'n_estimators': list(range(50, 301, 50)),
+        'max_depth': list(range(2, 11)),
+        'learning_rate': [0.01, 0.05, 0.1, 0.2],
+        'subsample': [0.5, 0.75, 1.0],
+        'colsample_bytree': [0.5, 0.75, 1.0]
+    },
+
+}
 
 
 BAYES_GRIDS = {

@@ -59,12 +59,13 @@ MARKERS = {
 # Default configuration
 DEFAULT_CONFIG = {
     "feature_cols": [
-        'RMSD', 'Δq', 
-        'polarons', 'ε', 
-        'Ce3_dist_sum', 'Ce3_dist_min', 'Ce3_dist_mean', 
-        'Ce3_dist_max', 'Ce3_dist_std', 'E_pol-pol', 'E_pol-lattice',
-        'Pt-O_bonds', 'Pt-O_dist_sum', 'Pt-O_dist_min', 'Pt-O_dist_mean', 
-        'Pt-O_dist_max', 'Pt-O_dist_std', 'Ov concentration(%)'
+        'RMSD', 'Δq'
+        # , 
+        # 'polarons', 'ε', 
+        # 'Ce3_dist_sum', 'Ce3_dist_min', 'Ce3_dist_mean', 
+        # 'Ce3_dist_max', 'Ce3_dist_std', 'E_pol-pol', 'E_pol-lattice',
+        # 'Pt-O_bonds', 'Pt-O_dist_sum', 'Pt-O_dist_min', 'Pt-O_dist_mean', 
+        # 'Pt-O_dist_max', 'Pt-O_dist_std', 'Ov concentration(%)'
     ],
     "target_col": "ΔEads",
     "structure_col": "structure",
@@ -98,23 +99,23 @@ DEFAULT_CONFIG = {
 FEATURE_NAME_MAP = {
     'Δq': 'Δq',
     'RMSD': 'RMSD'
-    ,
-    'polarons': 'Polaron count',
-    'ε': 'ε',
-    'Ce3_dist_sum': 'Σ(Ce³⁺-Ce³⁺ dist)',
-    'Ce3_dist_min': 'Min(Ce³⁺-Ce³⁺ dist)',
-    'Ce3_dist_mean': 'Mean(Ce³⁺-Ce³⁺ dist)',
-    'Ce3_dist_max': 'Max(Ce³⁺-Ce³⁺ dist)',
-    'Ce3_dist_std': 'Std(Ce³⁺-Ce³⁺ dist)',
-    'E_pol-pol': 'Epol-pol',
-    'E_pol-lattice': 'Epol-lattice',
-    'Pt-O_bonds': 'Pt-O bond count',
-    'Pt-O_dist_sum': 'Σ(Pt-O dist)',
-    'Pt-O_dist_min': 'Min(Pt-O dist)',
-    'Pt-O_dist_mean': 'Mean(Pt-O dist)',
-    'Pt-O_dist_max': 'Max(Pt-O dist)',
-    'Pt-O_dist_std': 'Std(Pt-O dist)',
-    'Ov concentration(%)': 'O vacancy (%)'
+    # ,
+    # 'polarons': 'Polaron count',
+    # 'ε': 'ε',
+    # 'Ce3_dist_sum': 'Σ(Ce³⁺-Ce³⁺ dist)',
+    # 'Ce3_dist_min': 'Min(Ce³⁺-Ce³⁺ dist)',
+    # 'Ce3_dist_mean': 'Mean(Ce³⁺-Ce³⁺ dist)',
+    # 'Ce3_dist_max': 'Max(Ce³⁺-Ce³⁺ dist)',
+    # 'Ce3_dist_std': 'Std(Ce³⁺-Ce³⁺ dist)',
+    # 'E_pol-pol': 'Epol-pol',
+    # 'E_pol-lattice': 'Epol-lattice',
+    # 'Pt-O_bonds': 'Pt-O bond count',
+    # 'Pt-O_dist_sum': 'Σ(Pt-O dist)',
+    # 'Pt-O_dist_min': 'Min(Pt-O dist)',
+    # 'Pt-O_dist_mean': 'Mean(Pt-O dist)',
+    # 'Pt-O_dist_max': 'Max(Pt-O dist)',
+    # 'Pt-O_dist_std': 'Std(Pt-O dist)',
+    # 'Ov concentration(%)': 'O vacancy (%)'
 }
 
 # set param_grids

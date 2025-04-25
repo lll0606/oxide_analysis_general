@@ -16,6 +16,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
 import re
 from scipy.stats import pearsonr
+import time
 
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
@@ -463,6 +464,7 @@ class OxideAnalysis:
     def run_analysis(self, data_file: str) -> Dict:
         """Run the complete analysis workflow"""
         logger.info(f"Starting analysis with {data_file}")
+        start_time = time.time()
         
         # Load and prepare data
         pt07_data, pt13_data, combined_data = self._load_data(data_file)
@@ -527,6 +529,11 @@ class OxideAnalysis:
         
         logger.info("Analysis completed!")
         self._organize_figures()
+        end_time = time.time()
+        total_time = end_time - start_time
+        total_minutes = total_time / 60
+        logger.info(f"Total time taken: {total_minutes:.2f} minutes")
+        logger.info(f"Total time taken: {total_time:.2f} seconds")
         return filtered_results
     
 

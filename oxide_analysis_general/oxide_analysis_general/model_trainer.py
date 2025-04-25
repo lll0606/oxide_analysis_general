@@ -663,6 +663,20 @@ class ModelTrainer:
                 train_indices = np.arange(len(y_train))
                 test_indices = np.arange(len(y_train), len(y_train) + len(y_test))
 
+                try:
+                    self.visualizer.log_errors_by_threshold(
+                        y_true=y_true_all,
+                        y_pred=y_pred_all,
+                        X=pd.concat([X_train, X_test], axis=0).reset_index(drop=True),
+                        structures=structures_all,
+                        cluster_name=cluster_name,
+                        stage='baseline',
+                        model_type=model_type,
+                        threshold=1.5
+                    )
+                except Exception as e:
+                    logger.warning(f"[{cluster_name}-{model_type}] Failed to log large error points in baseline stage: {str(e)}")
+
                 self.visualizer.plot_parity(
                     y_true = y_true_all, 
                     y_pred = y_pred_all, 
@@ -793,6 +807,20 @@ class ModelTrainer:
 
                     train_indices = np.arange(len(y_train))
                     test_indices = np.arange(len(y_train), len(y_train) + len(y_test))
+
+                    try:
+                        self.visualizer.log_errors_by_threshold(
+                            y_true=y_true_all,
+                            y_pred=y_pred_all,
+                            X=pd.concat([X_train_selected, X_test_selected], axis=0).reset_index(drop=True),
+                            structures=structures_all,
+                            cluster_name=cluster_name,
+                            stage='optimized',
+                            model_type=model_type,
+                            threshold=1.5
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{cluster_name}-{model_type}] Failed to log large error points in optimized stage: {str(e)}")
 
                     self.visualizer.plot_parity(
                         y_true = y_true_all,
@@ -955,6 +983,20 @@ class ModelTrainer:
 
                     train_indices = np.arange(len(y_train))
                     test_indices = np.arange(len(y_train), len(y_train) + len(y_test))
+
+                    try:
+                        self.visualizer.log_errors_by_threshold(
+                            y_true=y_true_all,
+                            y_pred=y_pred_all,
+                            X=pd.concat([X_train, X_test], axis=0).reset_index(drop=True),
+                            structures=structures_all,
+                            cluster_name=cluster_name,
+                            stage='stacking',
+                            model_type='ridge',
+                            threshold=1.5
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{cluster_name}-ridge Failed to log large error points in stacking stage: {str(e)}")
 
                     # plot the meta model parity
                     self.visualizer.plot_parity(

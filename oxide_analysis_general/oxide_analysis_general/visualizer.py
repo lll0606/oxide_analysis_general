@@ -114,11 +114,13 @@ class Visualizer:
         
         # Calculate correlation matrix
         corr_matrix = data_clean[cols].corr(method='pearson')
+        mapped_cols = self._map_feature_names(cols)
         
         # Create correlation heatmap
         plt.figure(figsize=(14, 12))
         #decrease the corelation matrix font size
         sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5,
+                    xticklabels=mapped_cols, yticklabels=mapped_cols,
                     annot_kws={"size": 10})
         plt.title(f"Pearson Correlation Matrix - {cluster_name}", fontsize=18)
         plt.xticks(rotation=45, ha='right', fontsize=14)
@@ -970,6 +972,39 @@ class Visualizer:
             plt.savefig(path, dpi=self.dpi, transparent=True)
             logger.info(f"Saved feature importance plot to {path}") 
         plt.close()
+
+
+    def log_errors_by_threshold(
+            y_true, y_pred, X, structures, cluster_name, model_type, stage, threshold=2.0, save_dir="results/errors"):
+        """record errors by threshold"""
+        import pandas as pd
+        import os
+        import numpy as np
+        from pathlib import Path
+
+        errors = np.abs(y_true - y_pred)
+        mask = errors > threshold
+
+        if mask.sum()==0:
+            logger.info(f"No points with errors above threshold {threshold} for {cluster_name} {model_type} in {stage} are found.")
+            return
+        
+        df_info = pd.DataFrame(X)
+        df_info["true"] = y_true
+        df_info["pred"] = y_pred
+        df_info["error"] = errors
+        df_info["structure"] = structures if structures is not None else ["N/A"] * len(y_true)
+
+        df_filtered = df_info[mask].copy()
+        df_filtered = df_filtered.sort_values(by="error", ascending=False)
+
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, f"{cluster_name}_{model_type}_{stage}_large_errors.csv")
+        df_filtered.to_csv(save_path, index=False)
+
+        print(f"[{cluster_name}][{model_type}] Saved {len(df_filtered)} error points to: {save_path}")
+            
+         
 
 
 

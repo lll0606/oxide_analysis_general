@@ -115,11 +115,13 @@ class Visualizer:
         # Calculate correlation matrix
         corr_matrix = data_clean[cols].corr(method='pearson')
         mapped_cols = self._map_feature_names(cols)
-        
+
+        mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+
         # Create correlation heatmap
         plt.figure(figsize=(14, 12))
         #decrease the corelation matrix font size
-        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5,
+        sns.heatmap(corr_matrix, annot=True, mask=mask, cmap='coolwarm', fmt=".2f", linewidths=0.5,
                     xticklabels=mapped_cols, yticklabels=mapped_cols,
                     annot_kws={"size": 10})
         plt.title(f"Pearson Correlation Matrix - {cluster_name}", fontsize=18)

@@ -56,16 +56,53 @@ MARKERS = {
     'rod': '*'        # Star
 }
 
+FEATURE_NAME_MAP = {
+    'ΔEads': 'ΔEads',
+    'Δq': 'Δq',
+    'RMSD': 'RMSD'
+    ,
+    'polarons': 'Polaron count',
+    'surface_polarons': 'Surface polaron count',
+    'ε': 'ε',
+    'Ce3_dist_sum': 'Σ(Ce³⁺-Ce³⁺ dist)',
+    'Ce3_dist_min': 'Min(Ce³⁺-Ce³⁺ dist)',
+    'Ce3_dist_mean': 'Mean(Ce³⁺-Ce³⁺ dist)',
+    'Ce3_dist_max': 'Max(Ce³⁺-Ce³⁺ dist)',
+    'Ce3_dist_std': 'Std(Ce³⁺-Ce³⁺ dist)',
+    'E_pol_pol': 'Epol-pol',
+    'E_pol_lattice': 'Epol-lattice',
+    'Pt_O_bonds': 'Pt-O bond count',
+    'Pt_O_dist_sum': 'Σ(Pt-O dist)',
+    'Pt_O_dist_min': 'Min(Pt-O dist)',
+    'Pt_O_dist_mean': 'Mean(Pt-O dist)',
+    'Pt_O_dist_max': 'Max(Pt-O dist)',
+    'Pt_O_dist_std': 'Std(Pt-O dist)',
+    'Ov_concentration(%)': 'O vacancy (%)'
+}
+
+FEATURE_GROUPS = {
+    "Pt_cluster": ["Δq", "RMSD"],
+    "interface": [
+        "Pt_O_bonds", "Pt_O_dist_sum", "Pt_O_dist_min", "Pt_O_dist_mean", 
+        "Pt_O_dist_max", "Pt_O_dist_std"
+    ],
+    "CeOx": [
+        "polarons", "surface_polarons", "ε", "Ce3_dist_sum", "Ce3_dist_min", "Ce3_dist_mean", 
+        "Ce3_dist_max", "Ce3_dist_std", "E_pol_pol", "E_pol_lattice",
+        "Ov_concentration(%)"
+    ]
+}
+
 # Default configuration
 DEFAULT_CONFIG = {
     "feature_cols": [
         'RMSD', 'Δq'
-        # , 
-        # 'polarons', 'ε', 
-        # 'Ce3_dist_sum', 'Ce3_dist_min', 'Ce3_dist_mean', 
-        # 'Ce3_dist_max', 'Ce3_dist_std', 'E_pol-pol', 'E_pol-lattice',
-        # 'Pt-O_bonds', 'Pt-O_dist_sum', 'Pt-O_dist_min', 'Pt-O_dist_mean', 
-        # 'Pt-O_dist_max', 'Pt-O_dist_std', 'Ov concentration(%)'
+        , 
+        'polarons', 'surface_polarons', 'ε', 
+        'Ce3_dist_sum', 'Ce3_dist_min', 'Ce3_dist_mean', 
+        'Ce3_dist_max', 'Ce3_dist_std', 'E_pol_pol', 'E_pol_lattice',
+        'Pt_O_bonds', 'Pt_O_dist_sum', 'Pt_O_dist_min', 'Pt_O_dist_mean', 
+        'Pt_O_dist_max', 'Pt_O_dist_std', 'Ov_concentration(%)'
     ],
     "target_col": "ΔEads",
     "structure_col": "structure",
@@ -84,7 +121,7 @@ DEFAULT_CONFIG = {
     "use_smart": True,
     "top_n": 8,
     "n_clusters": 3,
-    "max_total_features": 30
+    "max_total_features": 10
     },
     # advanced options
     "advanced_models": {
@@ -93,29 +130,8 @@ DEFAULT_CONFIG = {
         "visualize_hyperparameters": True,
         "models_to_visualize":['rf', 'gb', 'xgb'],
         "optimize_hyperparameters": True
-    }
-}
-
-FEATURE_NAME_MAP = {
-    'Δq': 'Δq',
-    'RMSD': 'RMSD'
-    # ,
-    # 'polarons': 'Polaron count',
-    # 'ε': 'ε',
-    # 'Ce3_dist_sum': 'Σ(Ce³⁺-Ce³⁺ dist)',
-    # 'Ce3_dist_min': 'Min(Ce³⁺-Ce³⁺ dist)',
-    # 'Ce3_dist_mean': 'Mean(Ce³⁺-Ce³⁺ dist)',
-    # 'Ce3_dist_max': 'Max(Ce³⁺-Ce³⁺ dist)',
-    # 'Ce3_dist_std': 'Std(Ce³⁺-Ce³⁺ dist)',
-    # 'E_pol-pol': 'Epol-pol',
-    # 'E_pol-lattice': 'Epol-lattice',
-    # 'Pt-O_bonds': 'Pt-O bond count',
-    # 'Pt-O_dist_sum': 'Σ(Pt-O dist)',
-    # 'Pt-O_dist_min': 'Min(Pt-O dist)',
-    # 'Pt-O_dist_mean': 'Mean(Pt-O dist)',
-    # 'Pt-O_dist_max': 'Max(Pt-O dist)',
-    # 'Pt-O_dist_std': 'Std(Pt-O dist)',
-    # 'Ov concentration(%)': 'O vacancy (%)'
+    },
+    "FEATURE_NAME_MAP": FEATURE_NAME_MAP,
 }
 
 # set param_grids

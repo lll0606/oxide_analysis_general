@@ -28,7 +28,7 @@ from sklearn.linear_model import Ridge
 from .data_processor import DataProcessor
 from .model_trainer import ModelTrainer
 from .visualizer import Visualizer
-from .config import DEFAULT_CONFIG, COLORS, MARKERS, FIGURES_DIR, ANALYSIS_DIR, PARAM_GRIDS, ACTIVE_CLUSTERS
+from .config import DEFAULT_CONFIG, COLORS, MARKERS, FIGURES_DIR, ANALYSIS_DIR, PARAM_GRIDS, ACTIVE_CLUSTERS, FEATURE_GROUPS,FEATURE_NAME_MAP
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -43,7 +43,8 @@ class OxideAnalysis:
         """
         # Use provided config or default
         self.config = config if config else DEFAULT_CONFIG
-        # Initialize components
+        if "FEATURE_GROUPS" not in self.config:
+            self.config["FEATURE_GROUPS"] = FEATURE_GROUPS
         self.data_processor = DataProcessor(self.config)
         self.model_trainer = ModelTrainer(self.config)
         self.visualizer = Visualizer(self.config)
@@ -100,7 +101,10 @@ class OxideAnalysis:
 
     def _split_data(self, X, y, structures, test_size=0.15, random_state=42):
         """Split data into training and testing sets"""
-        return train_test_split(X, y, structures, test_size=0.15, random_state=self.config['random_state']) 
+        X_train, X_test, y_train, y_test, struct_train, struct_test = train_test_split(
+            X, y, structures, test_size=test_size, random_state=random_state
+        )
+        return X_train, X_test, y_train, y_test, struct_train, struct_test
 
     def _train_and_evaluate_model(self, model, model_name, X_train, y_train, X_test, y_test):
         """Train and evaluate a model"""
@@ -127,13 +131,12 @@ class OxideAnalysis:
             'predictions': test_pred
         }
     
-    def _train_models_on_raw_features(self, X_train, y_train, X_test, y_test, structures, cluster_name):
+    def _train_models_on_raw_features(self, X_train, y_train, X_test, y_test, struct_train, struct_test, cluster_name):
         """
         stage 1 - Train standard models with raw features and hyperparameter tuning
         """
         logger.info (f"[{cluster_name}] for Stage 1: train standard models with raw features and hyperparameter tuning")
-        
-        raw_features = [f for f in self.config['feature_cols'] if f in X_train.columns]
+        raw_features = [f.replace("-", "_") for f in self.config['feature_cols'] if f.replace("-", "_") in X_train.columns]
         if not raw_features:
             logger.warning(f"No raw features found in {X_train.columns.tolist()} for {cluster_name}")
             return {}
@@ -146,7 +149,9 @@ class OxideAnalysis:
             y_train,
             X_test_raw,
             y_test,
-            structures=structures,
+            struct_train =struct_train,
+            struct_test = struct_test,
+            # structures=structures,
             cluster_name=cluster_name,
         )
 
@@ -157,7 +162,7 @@ class OxideAnalysis:
             'optimzation_results': baseline_results.get('optimzation_results', {})
         }
     
-    def _train_models_on_selected_features(self, X_train, y_train, X_test, y_test, selected_features, structures, cluster_name):
+    def _train_models_on_selected_features(self, X_train, y_train, X_test, y_test, selected_features, struct_train, struct_test, cluster_name):
         """
         stage 2 - Train standard models with selected features and hyperparameter tuning
         """
@@ -168,7 +173,8 @@ class OxideAnalysis:
             y_train,
             X_test[selected_features],
             y_test,
-            structures=structures,
+            struct_train = struct_train,
+            struct_test = struct_test,
             cluster_name=cluster_name
         )
 
@@ -179,8 +185,8 @@ class OxideAnalysis:
             'optimzation_results': selected_results.get('optimzation_results', {})
         }
     
-    def _train_on_stacking_model(self, selected_results, X_train, y_train,X_test, y_test,
-                                 structures, cluster_name):
+    def _train_on_stacking_model(self, selected_results, X_train, y_train,X_test, y_test, 
+                                 struct_train, struct_test,  cluster_name):
         """
         Stage 3: Train stacking ensemble model using base models from Stage 2.
         """
@@ -195,7 +201,9 @@ class OxideAnalysis:
             y_train=y_train,
             X_test=X_test,
             y_test=y_test,
-            structures=structures,
+            struct_train=struct_train,
+            struct_test=struct_test,
+            # structures=structures,
             cluster_name=cluster_name
         )
 
@@ -228,73 +236,6 @@ class OxideAnalysis:
                 'r2': best_r2,
                 'metrics': model_results[best_model_name]['test_metrics']}
       
-    def _analyze_cluster(self, X_raw, X_physics, X_scaled, y, structures, cluster_name):
-        """
-        Analyze a single cluster: (all need to do hyperparameter tuning fisrt training)
-        stage 1 - use raw features
-        stage 2 - use constructed and selected features
-        stage 3 - use advanced models
-        """
-
-        logger.info(f"Analyzing {cluster_name}, targeting R²=0.95")
-        logger.info(f"X_physics type: {type(X_physics)}, shape: {X_physics.shape}")
-        logger.info(f"X_scaled type: {type(X_scaled)}, shape: {X_scaled.shape}")
-        logger.info(f"y type: {type(y)}, shape: {y.shape}")
-        logger.info(f"structures type: {type(structures)}, shape: {structures.shape}")
-        
-        # preprocess features
-        X_physics = self.data_processor.preprocess_features(X_physics)
-
-        #plot the pearson correlation of X_physics
-        X_physical_full = X_physics.copy()
-        # X_physical_full = self.data_processor.create_physics_features(X_physics, y)
-        X_physical_with_target = X_physical_full.copy()
-        target_col = self.config.get("target_col", "target")
-        X_physical_with_target[target_col] = y.values
-        self.visualizer.plot_pearson_correlation(X_physical_with_target, cluster_name + "_physical")
-
-        # split the data  
-        X_train, X_test, y_train, y_test, struct_train, struct_test = self._split_data(
-            X_physics, y, structures,
-            test_size=self.config['test_size'],
-            random_state=self.config['random_state']
-        )
-        logger.info(f"Splitting data for {cluster_name} cluster: {len(X_train)} train samples, {len(X_test)} test samples")
-
-        X_raw_train, X_raw_test, _, _, _, _ = self._split_data(
-        X_raw, y, structures,
-        test_size=self.config['test_size'],
-        random_state=self.config['random_state']
-        )
-        # prepare results container
-        results = {}
-
-        # === stage 1 === Train standard models with raw features and hyperparameter tuning
-        if self.config.get("train_on_raw_features", True):
-            results['raw'] = self._train_models_on_raw_features(
-            X_raw_train, y_train, X_raw_test, y_test, structures, cluster_name,
-            )
-
-        # === stage 2 === Train standard models with selected features and hyperparameter tuning
-        if self.config.get("train_on_selected_features", True):
-            results['selected'] = self._train_models_on_selected_features(
-                X_train, y_train, X_test, y_test, X_physics.columns.tolist(), structures, cluster_name
-            )
-            logger.info(f"[DEBUG] structures type: {type(structures)}, length: {len(structures) if structures is not None else 'None'}")
-  
-
-        # === stage 3 === Train advanced models with selected features and hyperparameter tuning only for the meta model or the model has not been hyperparameter tuning
-        if self.config.get("train_on_stacking_models", True):  
-            results['stacking'] = self._train_on_stacking_model(
-                selected_results = results ['selected'],
-                X_train = X_train,
-                y_train = y_train, 
-                X_test = X_test, 
-                y_test = y_test,  
-                structures = structures,
-                cluster_name = cluster_name
-            )  
-        return results
 
     def _save_results(self, results: Dict) -> None:
         """save the results to the analysis directory"""
@@ -460,6 +401,116 @@ class OxideAnalysis:
 
             if not moved:
                 logger.debug(f"Kept {file.name} in figures/ (not baseline/optimized/stacking)")
+
+
+    def _analyze_cluster(self, X_raw, X_physics, X_scaled, y, structures, cluster_name):
+        """
+        Analyze a single cluster: (all need to do hyperparameter tuning fisrt training)
+        stage 1 - use raw features
+        stage 2 - use constructed and selected features
+        stage 3 - use advanced models
+        """
+
+        logger.info(f"Analyzing {cluster_name}, targeting R²=0.95")
+        logger.info(f"X_physics type: {type(X_physics)}, shape: {X_physics.shape}")
+        logger.info(f"X_scaled type: {type(X_scaled)}, shape: {X_scaled.shape}")
+        logger.info(f"y type: {type(y)}, shape: {y.shape}")
+        logger.info(f"structures type: {type(structures)}, shape: {structures.shape}")
+
+        # basic data process for step 1
+        X_raw_train, X_raw_test, y_train, y_test, struct_train, struct_test = self._split_data(
+            X_raw, y, structures,
+            test_size=self.config['test_size'],
+            random_state=self.config['random_state']
+        )
+        logger.info(f"Splitting data for {cluster_name} cluster: {len(X_raw_train)} train samples, {len(X_raw_test)} test samples")
+        results = {}
+        # === stage 1 === Train standard models with raw features and hyperparameter tuning
+        if self.config.get("train_on_raw_features", True):
+            logger.info(f"[{cluster_name}] for Stage 1: train standard models with raw features and hyperparameter tuning")
+            results['raw'] = self._train_models_on_raw_features(
+                X_raw_train, y_train, X_raw_test, y_test,
+                struct_train,struct_test, cluster_name,
+            )
+            # Check if the model is empty
+            target_col = self.config['target_col']
+            available_cols = [col for col in X_raw_train.columns if col != target_col]
+            Xy_filtered = X_raw_train.assign(**{target_col: y_train})[[target_col] + available_cols].copy()
+
+            correlation_df = self.model_trainer.compute_group_correlation_with_pvalues(
+                Xy_filtered, self.config["FEATURE_GROUPS"])
+            if not correlation_df.empty and correlation_df["significant"].any():
+                logger.info(f"Found {correlation_df['significant'].sum()} significant correlations in {cluster_name}")
+                self.visualizer.plot_correlation_network(
+                    correlation_df, cluster_name, 
+                    group_assignments=None
+                )
+            else:
+                logger.warning(f"No significant correlations found in {cluster_name} for raw features.")
+        # === stage 2 === Train standard models with selected features and hyperparameter tuning
+        if self.config.get("train_on_selected_features", True):
+            logger.info(f"[{cluster_name}] for Stage 2: train standard models with constructed+raw features and hyperparameter tuning")
+            X_physics_train = self.data_processor.create_physics_features(X_raw_train, y_train)
+            X_physics_test = self.data_processor.create_physics_features(X_raw_test, y_test)
+            logger.info(f"X_physics_train_columns: {X_physics_train.columns.tolist()}")
+            common_features = sorted(list(set(X_physics_train.columns) & set(X_physics_test.columns)))
+            logger.info(f"[{cluster_name}] Common physical features used: {common_features}")
+            X_physics_train = X_physics_train[common_features]
+            X_physics_test = X_physics_test[common_features]
+
+            #plot the pearson heatmap with updated feature names
+            # ✅ add correlation network for physical features with dynamic group inference
+            Xy_physics = X_physics_train.assign(**{self.config['target_col']: y_train})
+            group_assignments = {}
+            for col in Xy_physics.columns:
+                if col!= self.config['target_col']:
+                    group_assignments[col] = self.visualizer.infer_group_from_feature_name(col)
+            
+            dynamic_feature_groups = {}
+            for col,group in group_assignments.items():
+                if group not in dynamic_feature_groups:
+                    dynamic_feature_groups[group] = []
+                dynamic_feature_groups[group].append(col)
+            
+            for group, feats in dynamic_feature_groups.items():
+                logger.info (f"Dynamic group '{group}' contains features: {feats}")
+
+            corr_df_physics = self.model_trainer.compute_group_correlation_with_pvalues(
+                Xy_physics, feature_groups=dynamic_feature_groups
+            )
+            if not corr_df_physics.empty and corr_df_physics["significant"].any():
+                # 仅在存在显著性时绘制
+                self.visualizer.plot_correlation_network(
+                    corr_df_physics, cluster_name + "_physics", stage="optimized",
+                    group_assignments=group_assignments
+                )
+            else:
+                logger.warning(f"No significant correlations found in {cluster_name} for physical features.")
+            self.visualizer.plot_pearson_correlation(Xy_physics, cluster_name + "_physics")
+
+            results['selected'] = self._train_models_on_selected_features(
+                X_physics_train, y_train, X_physics_test, y_test,
+                  common_features, struct_train, struct_test, cluster_name
+            )
+            logger.info(f"[DEBUG] structures type: {type(struct_train)}, length: {len(struct_train) if struct_train is not None else 'None'}")
+            logger.info(f"[DEBUG] structures type: {type(struct_test)}, length: {len(struct_test) if struct_test is not None else 'None'}")
+  
+
+        # === stage 3 === Train advanced models with selected features and hyperparameter tuning only for the meta model or the model has not been hyperparameter tuning
+        if self.config.get("train_on_stacking_models", True):  
+            logger.info(f"[{cluster_name}] for Stage 3: train stacking model")
+            results['stacking'] = self._train_on_stacking_model(
+                selected_results = results ['selected'],
+                X_train = X_physics_train,
+                y_train = y_train, 
+                X_test = X_physics_test, 
+                y_test = y_test,  
+                struct_train = struct_train,
+                struct_test = struct_test,
+                cluster_name = cluster_name
+            )  
+        return results
+
 
     def run_analysis(self, data_file: str) -> Dict:
         """Run the complete analysis workflow"""

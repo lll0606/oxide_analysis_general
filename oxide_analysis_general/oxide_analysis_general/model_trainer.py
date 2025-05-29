@@ -75,6 +75,98 @@ class ModelTrainer:
             'MAE': mae
         }
 
+    def compute_group_correlation_with_pvalues(self, df: pd.DataFrame, feature_groups: Dict[str, List[str]]) -> pd.DataFrame:
+        """
+        Compute Pearson correlation and Bonferroni-corrected p-values between feature groups.
+        If feature_groups is empty, it will infer group for each feature using infer_group_from_feature_name().
+
+        Args:
+            df: DataFrame containing the features and the target column.
+            feature_groups: A dictionary mapping group names to lists of feature names.
+
+        Returns:
+            A DataFrame containing correlations, p-values, and significance between groups.
+        """
+        from scipy.stats import pearsonr
+        from statsmodels.stats.multitest import multipletests
+
+        logger.info(f"[DEBUG] Starting correlation analysis")
+        logger.debug(f"DataFrame columns: {df.columns.tolist()}")
+        logger.debug(f"Feature groups: {feature_groups}")
+
+        # Automatically infer group assignments if not provided
+        if not feature_groups:
+            logger.info("No feature_groups provided, inferring groups using infer_group_from_feature_name")
+            feature_groups = {}
+            for feat in df.columns:
+                if feat == self.config['target_col']:
+                    continue
+                group = self.visualizer.infer_group_from_feature_name(feat)
+                if group not in feature_groups:
+                    feature_groups[group] = []
+                feature_groups[group].append(feat)
+            for group, feats in feature_groups.items():
+                logger.info(f"Infferred group '{group}' with {len(feats)} features: {feats}")
+
+        results = []
+
+        # Loop through group pairs
+        groups = list(feature_groups.keys())
+        for i, group_a in enumerate(groups):
+            for j, group_b in enumerate(groups):
+                if i >= j:    
+                    continue
+
+                logger.debug(f"---- Comparing '{group_a}' with '{group_b}'-----")
+
+                features_a = feature_groups[group_a]
+                features_b = feature_groups[group_b]
+
+
+                for feat_a in features_a:
+                    for feat_b in features_b:
+                        if feat_a == feat_b:
+                            continue
+                        if feat_a not in df.columns or feat_b not in df.columns:
+                            logger.warning(f"[SKIP] Missing feature: {feat_a} or {feat_b} in DataFrame")
+                            continue
+                        x = df[feat_a]
+                        y = df[feat_b]
+                        if x.isnull().any() or y.isnull().any():
+                            logger.warning(f"[SKIP] NaN values found in {feat_a} or {feat_b}, skipping correlation")
+                            continue
+                        try:
+                            corr, pval = pearsonr(x, y)
+                            results.append({
+                                "group_a": group_a,
+                                "group_b": group_b,
+                                "feature_a": feat_a,
+                                "feature_b": feat_b,
+                                "correlation": corr,
+                                "p_value": pval,
+                            })
+                        except Exception as e:
+                            logger.warning(f"Correlation failed for {feat_a} vs {feat_b}: {e}")
+        df_result = pd.DataFrame(results)
+        if df_result.empty:
+            logger.warning("No valid feature pairs found for correlation or p-value correction.")
+            return pd.DataFrame(columns=[
+                "group_a", "group_b", "feature_a", "feature_b", "correlation", "p_value",
+                "p_value_corrected", "significant"
+            ])
+        logger.info(f"[INFO] Total valid correlation or p-value pairs: {len(df_result)}")
+        logger.debug(f"Applying Bonferroni correction to {len(df_result)} p-value pairs")
+
+        # Apply Bonferroni correction
+        corrected = multipletests(df_result["p_value"], method="bonferroni")
+        df_result["p_value_corrected"] = corrected[1]
+        df_result["significant"] = corrected[0]
+
+        sig_count = df_result["significant"].sum()
+        logger.info(f"Found {sig_count} significant correlations after Bonferroni correction")
+
+        return df_result
+
     def analyze_feature_importance(self, model, feature_names, X=None, y=None):
         """
         Analyze feature importance for a model
@@ -85,6 +177,7 @@ class ModelTrainer:
         Returns:
             Dictionary with feature importance information
         """
+        feature_names = [f for f in feature_names if f in self.config.get("feature_names", [])]
         importance_data = {}
         
         # Check if model has feature_importances_ attribute (tree-based models)
@@ -135,7 +228,6 @@ class ModelTrainer:
         
         return importance_data
 
-
     def feature_contribution_analysis(self, model, X, feature_names):
         """
         Analyze how individual features contribute to predictions
@@ -147,6 +239,7 @@ class ModelTrainer:
             Dictionary with feature contribution information
         """
         # This works best with tree-based models
+        feature_names = [f for f in feature_names if f in self.config.get("feature_names", [])]
         if not hasattr(model, 'feature_importances_'):
             logger.warning("Model does not have feature_importances_ attribute, analysis may be limited")
         
@@ -183,7 +276,6 @@ class ModelTrainer:
             'feature_impact': dict(sorted_features),
             'top_features': [f for f, _ in sorted_features[:min(10, len(sorted_features))]]
         }
-       
 
     def optimize_model_hyperparameters(self, X, y, model_type='rf', param_grid=None):
         """
@@ -571,8 +663,8 @@ class ModelTrainer:
             logger.info(f"[DEBUG] Final opt_results type by grid: {type(opt_results)}")
             return grid_model, grid_params, opt_results
 
-    def train_baseline_models(self, X_train, y_train, X_test=None, y_test=None, 
-                              structures = None, cluster_name = None):
+    def train_baseline_models(self, X_train, y_train, X_test=None, y_test=None,
+                              struct_train=None, struct_test=None, cluster_name = None):
         """
         Train standard models (rf/gb/xgb) using original feature set only.
         Includes hyperparameter optimization and re-training.
@@ -584,7 +676,16 @@ class ModelTrainer:
         model_types = ['rf', 'gb', 'xgb']
         results = {'models': {}, 'params': {}, 'scores': {}, 'optimization_results': {}}
 
-        logger.info(f"[DEBUG] train_baseline_models: input X_train.columns: {X_train.columns.tolist()}") 
+        logger.info(f"[DEBUG] train_baseline_models: input X_train.columns: {X_train.columns.tolist()}")
+
+        if struct_train is not None and struct_test is not None:
+            structures_all = np.concatenate([struct_train, struct_test])
+        else:
+            structures_all = None
+        
+        train_indices = np.arange(len(y_train))
+        test_indices = np.arange(len(y_train), len(y_train) + len(y_test)) if X_test is not None else None
+
         for model_type in model_types:
             try:
                 X_train = X_train.select_dtypes(include=[np.number])
@@ -638,6 +739,7 @@ class ModelTrainer:
                 legal_params = model.get_params().keys()
                 filtered_params = {k: v for k, v in best_params.items() if k in legal_params}
                 model.set_params(**filtered_params)
+
                 if isinstance(y_train, pd.DataFrame):
                     y_train = y_train.squeeze()
                 model.fit(X_train, y_train)
@@ -659,9 +761,6 @@ class ModelTrainer:
                 test_pred = model.predict(X_test)
                 y_true_all = np.concatenate([y_train, y_test])
                 y_pred_all = np.concatenate([train_pred, test_pred])
-                structures_all = np.concatenate([structures[:len(y_train)], structures[len(y_train):]])
-                train_indices = np.arange(len(y_train))
-                test_indices = np.arange(len(y_train), len(y_train) + len(y_test))
 
                 try:
                     self.visualizer.log_errors_by_threshold(
@@ -690,12 +789,17 @@ class ModelTrainer:
                 )
                 # plot the feature importance
                 try:
+                    feature_names = X_train.columns.tolist()
+                    allowed_features = [f.replace("-", "_") for f in self.config["feature_cols"]]
+                    feature_names = [f for f in feature_names if f in allowed_features]
+                    group_assignment = {f: g for g, feats in self.config.get("FEATURE_GROUPS", {}).items() for f in feats}
                     self.visualizer.plot_feature_importance(
                         model=model,
-                        feature_names=X_train.columns.tolist(),
+                        feature_names=feature_names,
                         cluster_name=cluster_name,
                         model_type=model_type,
                         stage='baseline',
+                        group_assignment=group_assignment,
                         title=f"{cluster_name} {model_type} (baseline)",
                     )
                 except Exception as e:
@@ -705,7 +809,8 @@ class ModelTrainer:
                 logger.warning(f"{model_type} failed during baseline training: {str(e)}")
         return results
 
-    def train_optimized_models(self, X_train, y_train,  X_test = None, y_test = None, structures = None, cluster_name=None):
+    def train_optimized_models(self, X_train, y_train,  X_test = None, y_test = None, 
+                               struct_train = None, struct_test = None, cluster_name=None):
         """train optimized model to achieve high R²"""
         import pandas as pd
         import numpy as np
@@ -713,8 +818,13 @@ class ModelTrainer:
         
         logger.info("start training optimized model")
 
-        if structures is None and "structures" in X_train:
-            structures = X_train("structures").values
+        if struct_train is not None and struct_test is not None:
+            structures_all = np.concatenate([struct_train, struct_test])
+        else:
+            structures_all = None
+
+        train_indices = np.arange(len(y_train))
+        test_indices = np.arange(len(y_train), len(y_train) + len(y_test)) if X_test is not None else None
 
         # check if y is a 
         if isinstance(y_train, pd.DataFrame):
@@ -728,6 +838,7 @@ class ModelTrainer:
         selected_features = X_train_selected.columns.tolist()
         logger.info(f"X_train shape: {X_train.shape}, X_test shape: {X_test.shape if X_test is not None else None}")
         
+        
         results = {
             'feature_importance': {},
             'feature_contribution': {},
@@ -738,6 +849,9 @@ class ModelTrainer:
             'test_labels': y_test,
             'models': {}
         }
+
+        df_all = pd.concat([X_train_selected, X_test_selected], axis=0) if X_test_selected is not None else X_train_selected
+        group_assignment = self.visualizer.assign_feature_to_group_by_correlation(df_all)
 
         model_types = ['rf', 'gb', 'xgb']
         for model_type in model_types:
@@ -803,10 +917,6 @@ class ModelTrainer:
 
                     y_true_all = np.concatenate([y_train, y_test])
                     y_pred_all = np.concatenate([train_pred, test_pred])
-                    structures_all = np.concatenate([structures[:len(y_train)], structures[len(y_train):]])
-
-                    train_indices = np.arange(len(y_train))
-                    test_indices = np.arange(len(y_train), len(y_train) + len(y_test))
 
                     try:
                         self.visualizer.log_errors_by_threshold(
@@ -834,13 +944,18 @@ class ModelTrainer:
                         cluster_name=cluster_name,
                     )
                     # plot the feature importance
-                    self.visualizer.plot_feature_importance(
-                        model=model,
-                        feature_names=selected_features,
-                        cluster_name=cluster_name,
-                        model_type=model_type,
-                        stage='optimized',
-                    )
+                    try:
+                        feature_names = selected_features
+                        self.visualizer.plot_feature_importance(
+                            model=model,
+                            feature_names=feature_names,
+                            cluster_name=cluster_name,
+                            model_type=model_type,
+                            stage='optimized',
+                            group_assignment=group_assignment 
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to plot feature importance for {model_type} in optimized model: {str(e)}")
                 except Exception as e:
                     logger.warning(f"Failed to evaluate or visualize hyperparameter tuning for {model_type} in optimized model: {str(e)}")
         # train stacked model
@@ -852,7 +967,8 @@ class ModelTrainer:
                 y_train=y_train,
                 X_test=X_test_selected,
                 y_test=y_test,
-                structures=structures,
+                struct_train=struct_train,
+                struct_test=struct_test,
                 cluster_name=cluster_name
             )
             results['stacked_ensemble'] = stack_results
@@ -863,7 +979,7 @@ class ModelTrainer:
         return results
   
     def train_stacking_model(self, base_models, X_train, y_train, X_test=None, y_test=None, 
-                             structures=None, cluster_name=None):
+                             struct_train=None, struct_test=None, cluster_name=None):
         """
         Train a stacking ensemble model using pre-trained base models.
         Args:
@@ -882,6 +998,13 @@ class ModelTrainer:
         from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
         logger.info(f"[{cluster_name}] Training stacking ensemble model")
+
+        if struct_train is not None and struct_test is not None:
+            structures_all = np.concatenate([struct_train, struct_test])
+        else:
+            structures_all = None
+        train_indices = np.arange(len(y_train))
+        test_indices = np.arange(len(y_train), len(y_train) + len(y_test)) if X_test is not None else None
 
         if isinstance(y_train, pd.DataFrame):
             y_train = y_train.squeeze()
@@ -957,6 +1080,7 @@ class ModelTrainer:
                 refit_base_models[name] = model
             except Exception as e:
                 logger.warning(f"[{cluster_name}] Failed to refit base model {name} in the stacking stage: {str(e)}")
+
         test_meta_features_list = []
         for name, model in refit_base_models.items():
             try:
@@ -964,6 +1088,7 @@ class ModelTrainer:
                 logger.info(f"[{cluster_name}] Generated test meta features for base model: {name}")
             except Exception as e:
                 logger.warning(f"[{cluster_name}] Failed test prediction for {name}: {str(e)}")
+
         if test_meta_features_list:
             test_meta_features = np.column_stack(test_meta_features_list)
             test_preds = meta_model.predict(test_meta_features)
@@ -976,13 +1101,9 @@ class ModelTrainer:
                 'MAE': mean_absolute_error(y_test, test_preds)
             }
             try:
-                if structures is not None:
+                if structures_all is not None:
                     y_true_all = np.concatenate([y_train, y_test])
                     y_pred_all = np.concatenate([train_preds, test_preds])
-                    structures_all = np.concatenate([structures[:len(y_train)], structures[len(y_train):]])
-
-                    train_indices = np.arange(len(y_train))
-                    test_indices = np.arange(len(y_train), len(y_train) + len(y_test))
 
                     try:
                         self.visualizer.log_errors_by_threshold(
@@ -1021,10 +1142,10 @@ class ModelTrainer:
                         },
                         X_train=X_train,
                         y_train=y_train,
-                        struct_train=structures[:len(y_train)],
+                        struct_train=struct_train,
                         X_test=X_test,
                         y_test=y_test,
-                        struct_test=structures[len(y_train):],
+                        struct_test=struct_test,
                         cluster_name=cluster_name
                     )
                 else:

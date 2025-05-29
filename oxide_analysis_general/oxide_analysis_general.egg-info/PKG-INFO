@@ -1,11 +1,11 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: oxide_analysis_general
 Version: 0.1.0
 Summary: Generalized Oxide Descriptor Analysis Package
 Author: Lulu Li
 Author-email: lli@iciq.es
 Requires-Python: >=3.8
-Requires-Dist: numpy>=1.20
+Requires-Dist: numpy<1.24,>=1.20
 Requires-Dist: pandas>=1.3
 Requires-Dist: matplotlib>=3.4
 Requires-Dist: scikit-learn>=1.0
@@ -14,3 +14,11 @@ Requires-Dist: tqdm>=4.60
 Requires-Dist: openpyxl>=3.0
 Requires-Dist: scipy>=1.7
 Requires-Dist: scikit-optimize>=0.9
+Requires-Dist: scikit-learn<1.4,>=1.3
+Requires-Dist: xgboost<2.0,>=1.7
+Requires-Dist: scikit-optimize<0.10,>=0.9
+Dynamic: author
+Dynamic: author-email
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

@@ -35,10 +35,54 @@ class Visualizer:
         self.set_plot_style()
         logger.info("Visualizer initialized")
     
-    def _map_feature_names(self, feature_names: List[str]) -> List[str]:
-        """Map raw feature names to standardized display names using FEATURE_NAME_MAP"""
+    def _map_feature_names(self, feature_list: List[str]) -> List[str]:
+        """Map raw and constructed feature names to standardized display names."""
         name_map = self.config.get("FEATURE_NAME_MAP", {})
-        return [name_map.get(name, name) for name in feature_names]
+        mapped_names = []
+        for feat in feature_list:
+            feat_fixed = feat.replace("-", "_") 
+            if feat_fixed.startswith("inv_"):
+                base_feat = feat_fixed[4:]
+                mapped_base = name_map.get(base_feat, base_feat)
+                mapped_feat = f"Inverse {mapped_base}"
+            elif '_x_' in feat_fixed or 'x' in feat_fixed:
+                sep = '_x_' if '_x_' in feat_fixed else 'x'
+                parts = feat_fixed.split(sep)
+                mapped_parts = []
+                for part in parts:
+                    part = part.strip()
+                    mapped_part = name_map.get(part, part)
+                    mapped_parts.append(mapped_part)
+                mapped_feat = " x ".join(mapped_parts) 
+            elif '/' in feat_fixed:
+                parts = feat_fixed.split('/')
+                mapped_parts = []
+                for part in parts:
+                    part = part.strip()
+                    mapped_part = name_map.get(part, part)
+                    mapped_parts.append(mapped_part)
+                mapped_feat = " / ".join(mapped_parts)
+            elif '-' in feat_fixed and not feat_fixed.startswith('-'):
+                parts = feat_fixed.split('-')
+                mapped_parts = []
+                for part in parts:
+                    part = part.strip()
+                    mapped_part = name_map.get(part, part)
+                    mapped_parts.append(mapped_part)
+                mapped_feat = " - ".join(mapped_parts)
+            elif '+' in feat_fixed:
+                parts = feat_fixed.split('+')
+                mapped_parts = []
+                for part in parts:
+                    part = part.strip()
+                    mapped_part = name_map.get(part, part)
+                    mapped_parts.append(mapped_part)
+                mapped_feat = " + ".join(mapped_parts)
+
+            else:
+                mapped_feat = name_map.get(feat_fixed, feat_fixed)
+            mapped_names.append(mapped_feat)
+        return mapped_names
 
     def set_plot_style(self):
         """Set the default plot style"""
@@ -82,48 +126,55 @@ class Visualizer:
                                 save_dir: Path = FIGURES_DIR) -> None:
         """
         Plot Pearson correlation heatmap 
-        Args:
-            data: DataFrame with features
-            cluster_name: Name of the cluster for the plot title
-            save_dir: Directory to save the plot
         """
         logger.info(f"Creating Pearson correlation heatmap for {cluster_name}")
 
         target_col = self.config["target_col"]
-        physical_feature_prefixes = ['_/_', '_x_', 'diff(-)', 'inv_']
+        feature_cols = self.config["feature_cols"]
 
-        # Decide which features to use
-        if "physical" in cluster_name.lower():
-            constructed_features = [col for col in data.columns 
-                                if any(p in col for p in physical_feature_prefixes)]
-            original_features = [col for col in self.config.get("feature_cols", []) if col in data.columns]
-            feature_cols = constructed_features + original_features
-            logger.info(f"Detected 'physical' cluster, using physical + original features: {feature_cols}")
-        else:
-            feature_cols = [col for col in self.config.get("feature_cols", []) if col in data.columns]
-            logger.info(f"Using original features from config: {feature_cols}")
-        
         if target_col not in data.columns:
             logger.error(f"Target column '{target_col}' not found in data.")
             return
+        
+        candidate_features = [col for col in data.columns if col != target_col]
+        if set(feature_cols).issubset(set(candidate_features)):
+            feature_cols = feature_cols
+        else:
+            feature_cols = [col for col in candidate_features if any(base in col for base in feature_cols)]
 
-        cols = [target_col] + feature_cols
-        
-        # Drop rows with NaN values
-        data_clean = data.dropna(subset=cols)
-        
-        # Calculate correlation matrix
-        corr_matrix = data_clean[cols].corr(method='pearson')
-        mapped_cols = self._map_feature_names(cols)
+        feature_cols = [col for col in feature_cols if col in data.columns]
+        data_clean = data.dropna(subset=[target_col] + feature_cols)
+        mapped_feature_cols = self._map_feature_names(feature_cols)
+        mapped_target_col = self._map_feature_names([target_col])[0]
+        data_corr = data_clean[[target_col] + feature_cols].copy()
+        data_corr.columns = [mapped_target_col] + mapped_feature_cols
+        corr_matrix = data_corr.corr(method='pearson')
+        # mapped_cols = self._map_feature_names(feature_cols)
+        # mapped_target = self._map_feature_names([target_col])[0]
+        # corr_matrix.columns = [mapped_target] + mapped_cols
+        # corr_matrix.index = [mapped_target] + mapped_cols
 
         mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+        figsize_base = 10
+        num_features = len(feature_cols)
+        dynamic_size = figsize_base + num_features * 0.5
+        fig, ax = plt.subplots(figsize=(dynamic_size, dynamic_size))
+        # fig, ax = plt.subplots(figsize=(14, 12))
+        cmap = plt.cm.viridis
+        sns.heatmap(
+            corr_matrix, 
+            annot=True, 
+            mask=mask, 
+            vmin=-1,
+            vmax=1,
+            cmap=cmap,
+            square=True,
+            fmt=".2f", 
+            linewidths=0.5,
+            annot_kws={"size": 10},
+            ax=ax)
+        
 
-        # Create correlation heatmap
-        plt.figure(figsize=(14, 12))
-        #decrease the corelation matrix font size
-        sns.heatmap(corr_matrix, annot=True, mask=mask, cmap='coolwarm', fmt=".2f", linewidths=0.5,
-                    xticklabels=mapped_cols, yticklabels=mapped_cols,
-                    annot_kws={"size": 10})
         plt.title(f"Pearson Correlation Matrix - {cluster_name}", fontsize=18)
         plt.xticks(rotation=45, ha='right', fontsize=14)
         plt.yticks(fontsize=14)
@@ -146,25 +197,14 @@ class Visualizer:
         """
         import matplotlib.pyplot as plt
         from scipy.stats import pearsonr
+        logger.info(f"Creating key correlations plot for {cluster_name}")  
 
         target_col = self.config["target_col"]
-        physical_feature_prefixes = ['_/_', '_x_', '-', 'inv_']
+        allowed_cols = self.config["feature_cols"]
+        feature_cols = [col for col in data.columns if col in allowed_cols and col != target_col]
 
-        if "physical" in cluster_name.lower():
-            # 识别物理特征 + 原始特征
-            constructed_features = [col for col in data.columns if any(p in col for p in physical_feature_prefixes)]
-            original_features = [col for col in self.config.get("feature_cols", []) if col in data.columns]
-            feature_cols = constructed_features + original_features
-            logger.info(f"[{cluster_name}] Using physical + original features: {feature_cols}")
-        else:
-            # 只用 config 中定义的原始特征
-            feature_cols = [col for col in self.config.get("feature_cols", []) if col in data.columns]
-            logger.info(f"[{cluster_name}] Using original config features: {feature_cols}")
-
-        # filter valid features
-        available_cols = [col for col in feature_cols if pd.api.types.is_numeric_dtype(data[col])]
-        data_clean = data.dropna(subset=available_cols + [target_col])
-
+        data_clean = data.dropna(subset = feature_cols + [self.config["target_col"]])
+        available_cols = feature_cols
         # calculate Pearson r
         correlations = []
         for col in available_cols:
@@ -183,9 +223,13 @@ class Visualizer:
         features = [x[0] for x in correlations]
         r_values = [x[1] for x in correlations]
 
+        name_map = self.config.get("FEATURE_NAME_MAP", {})
+        mapped_features = self._map_feature_names(features)
+
         # plot
         plt.figure(figsize=(10, len(features) * 0.5 + 2))
-        bars = plt.barh(features, r_values, color='steelblue', edgecolor='black')
+        bars = plt.barh(mapped_features, r_values, color='steelblue', edgecolor='black')
+
         plt.axvline(0, color='grey', linestyle='--', alpha=0.5)
         plt.xlabel('Pearson correlation coefficient', fontsize=14)
         plt.title(f"Key Correlations with {target_col} - {cluster_name}", fontsize=16)
@@ -196,7 +240,6 @@ class Visualizer:
             width = bar.get_width()
             plt.text(width + 0.02 * np.sign(width), bar.get_y() + bar.get_height() / 2,
                     f"{r:.2f}", va='center', ha='left', fontsize=10, color='black')
-
         # save
         for fmt in self.config.get("fig_formats", ["png"]):
             save_path = self.get_figure_save_path(
@@ -251,13 +294,13 @@ class Visualizer:
                 test_mask = structure_mask & np.isin(np.arange(len(y_true)), test_indices)
                 plt.scatter(y_true[train_mask], y_pred[train_mask], 
                             label=f"{struct} (Train)", 
-                            alpha=0.5, s=100, color=color, edgecolors='k', marker=marker) 
+                            alpha=0.5, s=240, color=color, edgecolors='k', marker=marker) 
                             
                 plt.scatter(y_true[test_mask], y_pred[test_mask],
                             label=f"{struct} (Test)", 
-                            alpha=1.0, s=100, color=color, edgecolors='k', marker=marker)
+                            alpha=1.0, s=240, color=color, edgecolors='k', marker=marker)
         else:
-            plt.scatter(y_true, y_pred, alpha=0.7, s=100, edgecolors='k')
+            plt.scatter(y_true, y_pred, alpha=0.7, s=240, edgecolors='k')
             logger.info("No structures provided, using default color scheme")
 
         # Plot perfect prediction line
@@ -265,9 +308,12 @@ class Visualizer:
         max_val = max(np.max(y_true), np.max(y_pred)) + 0.5
         # add a margin to the plot
         plt.plot([min_val, max_val], [min_val, max_val], 'k--', lw=1)
-        plt.xlabel("DFT ΔEads (eV)", fontsize=16)
-        plt.ylabel("Predicted ΔEads (eV)", fontsize=16)
-        plt.title(title, fontsize=18)
+        target_label = self.config.get("target_col", "target")
+        mapped_target = self.config.get("FEATURE_NAME_MAP", {}).get(target_label, target_label)
+        plt.xlabel(f"DFT {mapped_target} (eV)", fontsize=24)
+        plt.ylabel(f"Predicted {mapped_target} (eV)", fontsize=24)
+        plt.title(title, fontsize=24)
+        plt.tick_params(axis='both', labelsize=20)  
         plt.grid(True, alpha=0.3)
         plt.xlim(min_val, max_val)
         plt.ylim(min_val, max_val)
@@ -432,7 +478,7 @@ class Visualizer:
         df["True"] = y_true
 
         plt.figure(figsize=(10, 6))
-        sns.heatmap(df.corr(), annot=True, fmt=".2f", cmap="coolwarm", cbar=True)
+        sns.heatmap(df.corr(), annot=True, fmt=".2f", cmap="viridis", cbar=True)
         plt.title(f"{cluster_name} Meta-feature Correlation Heatmap", fontsize=14)
         plt.tight_layout()
 
@@ -551,14 +597,13 @@ class Visualizer:
         fixed_params = {k: v for k, v in candidate_params.items() if k in legal_keys}
         title_prefix = f"{model_type.upper()} - {cluster_name}"
         for param_name, param_sets in param_grid.items():
-            for fmt in self.config.get("fig_formats", ["png"]):
-                save_path = self.get_figure_save_path(
-                    stage=stage, 
-                    cluster_name=cluster_name, 
-                    model_type=model_type, 
-                    plot_type=f"{param_name} hyperparameter_tuning", 
-                    fmt=fmt
-                )
+            save_path = self.get_figure_save_path(
+                stage=stage, 
+                cluster_name=cluster_name, 
+                model_type=model_type, 
+                plot_type=f"{param_name} hyperparameter_tuning", 
+                fmt=self.config.get("fig_formats", ["png"])[0]
+            )
             self._scan_and_plot_hyperparam(
                 model_class=model_map[model_type],
                 param_grid=param_sets,
@@ -927,42 +972,142 @@ class Visualizer:
         else:
             logger.warning("Missing metrics dictionaries for comparison visualization")
 
-    def plot_feature_importance(self, model, feature_names: List[str], cluster_name: str, model_type: str,
-                                stage: Optional[str] = None, title: str = "Feature Importance", save_path: Optional[str] = None
-                               ) -> None:
+    def infer_group_from_feature_name(self, feature_name: str) -> str:
         """
-        Plot feature importance for a model  
-        Args:
-            model: Trained model with feature_importances_ attribute
-            feature_names: List of feature names
-            title: Plot title
-            save_path: Path to save the plot
+        Infer the group (Pt_cluster, interface, CeOx) of a feature name using the config FEATURE_GROUPS.
+        Used when no group_assignment is explicitly provided.
+        """
+
+        feature_groups = self.config.get("FEATURE_GROUPS", {})
+        logger.debug(f"Available feature groups: {feature_groups}")
+
+        flat_map = {}
+        for group, feats in feature_groups.items():
+            for feat in feats:
+                flat_map[feat] = group
+                flat_map[feat.replace("-", "_")] = group
+
+        logger.debug(f"Flat map of features to groups: {flat_map}")
+        
+        if feature_name in flat_map:
+            return flat_map[feature_name]
+        
+        feature_normalized = feature_name.replace("-", "_")
+        if feature_normalized in flat_map:
+            return flat_map[feature_normalized]
+        
+        if feature_normalized.startswith("inv_"):
+            best_feat = feature_normalized[4:]
+            if best_feat in flat_map:
+                return flat_map[best_feat]
+            
+        for sep in ['_x_', 'x', '/', '-', '+', '*', '^']:
+            if sep in feature_name:
+                parts = feature_name.split(sep)
+                matched_groups = []
+
+                for part in parts:
+                    part = part.strip()
+                    if part in flat_map:
+                        matched_groups.append(flat_map[part])
+                    elif part.replace("-", "_") in flat_map:
+                        matched_groups.append(flat_map[part.replace("-", "_")])
+                
+                if matched_groups:
+                    from collections import Counter
+                    return Counter(matched_groups).most_common(1)[0][0]
+                
+        for base_feat, group in flat_map.items():
+            if base_feat in feature_name or feature_name in base_feat:
+                return group
+            
+        logger.warning(f"Feature '{feature_name}' not found in any group. Defaulting to 'unknown'.")
+        return "unknown"
+    
+    def assign_feature_to_group_by_correlation(self, df: pd.DataFrame) -> Dict[str, str]:
+        """
+        Assign each feature to a group based on Pearson correlation with known base features.
+
+        Returns:
+            Dictionary: feature_name -> group_name
+        """
+        from scipy.stats import pearsonr
+        base_groups = self.config.get("FEATURE_GROUPS", {})
+        assignment = {}
+
+        # Flatten base features
+        base_features = {feat: group for group, feats in base_groups.items() for feat in feats}
+
+        for feat in df.columns:
+            if feat == self.config['target_col']:
+                continue
+
+            max_corr = -1
+            assigned_group = "unknown"
+
+            for base_feat, group in base_features.items():
+                if base_feat not in df.columns:
+                    continue
+                try:
+                    corr, _ = pearsonr(df[feat], df[base_feat])
+                    if abs(corr) > max_corr:
+                        max_corr = abs(corr)
+                        assigned_group = group
+                except Exception:
+                    continue
+            
+            assignment[feat] = assigned_group
+
+        return assignment
+
+    def plot_feature_importance(self, model, feature_names: List[str], cluster_name: str, model_type: str,
+                                stage: Optional[str] = None, title: str = "Feature Importance",
+                                save_path: Optional[str] = None,
+                                group_assignment: Optional[Dict[str, str]] = None) -> None:
+        """
+        Plot feature importance for a model, using group-based color mapping (from group_assignment if provided).
         """
         if not hasattr(model, 'feature_importances_'):
             logger.warning(f"Model {type(model).__name__} does not have feature_importances_ attribute")
             return
-            
+
         importances = model.feature_importances_
 
-        # make sure the length of feature names matches the length of importances
         if len(feature_names) != len(importances):
-            logger.warning(f"Feature names length ({len(feature_names)}) does not match "
-                     f"importances length ({len(importances)})")
+            logger.warning(f"Feature names length ({len(feature_names)}) does not match importances length ({len(importances)})")
             feature_names = feature_names[:len(importances)]
 
-
-        # Sort features by importance
-        indices = np.argsort(importances)[::-1]
-
-        #plot
-        plt.figure(figsize=(16, 8))
-        plt.title(f"{cluster_name} {model_type} feature importance", fontsize=16)
-        plt.bar(range(len(feature_names)), importances[indices], align='center')
         mapped_names = self._map_feature_names(feature_names)
-        plt.xticks(range(len(mapped_names)), [mapped_names[i] for i in indices], 
-                  rotation=45, ha='right')
+
+        inferred_groups = {}
+
+        # === 使用分组信息（优先 group_assignment） ===
+        if group_assignment is not None:
+            for feat in feature_names:
+                if feat in group_assignment:
+                    inferred_groups[feat] = group_assignment[feat]
+                else:
+                    inferred_groups[feat] = self.infer_group_from_feature_name(feat)
+        else:
+            for feat in feature_names:
+                inferred_groups[feat] = self.infer_group_from_feature_name(feat)
+
+        indices = np.argsort(importances)[::-1]
+        sorted_importances = importances[indices]
+        sorted_feature_names = [feature_names[i] for i in indices]
+        sorted_mapped_names = [mapped_names[i] for i in indices]
+        sorted_groups = [inferred_groups[feature_names[i]] for i in indices]
+
+        group_colors = {'Pt_cluster': '#5571abff', 'interface': '#ed936bff', 'CeOx': '#7dc0a7ff'}
+        bar_colors = [group_colors.get(g, '#7f7f7f') for g in sorted_groups]
+
+        plt.figure(figsize=(16, 8))
+        plt.rcParams['font.family'] = 'Arial'
+        plt.title(f"{cluster_name} {model_type} feature importance", fontsize=16)
+        plt.bar(range(len(sorted_mapped_names)), sorted_importances, color=bar_colors)
+        plt.xticks(range(len(sorted_mapped_names)), sorted_mapped_names, rotation=45, ha='right', fontsize=14)
         plt.tight_layout()
-        
+
         for fmt in self.fig_format:
             path = self.get_figure_save_path(
                 stage=stage,
@@ -972,12 +1117,141 @@ class Visualizer:
                 fmt=fmt
             )
             plt.savefig(path, dpi=self.dpi, transparent=True)
-            logger.info(f"Saved feature importance plot to {path}") 
+            logger.info(f"Saved feature importance plot to {path}")
         plt.close()
 
+        mask = sorted_importances > 0.05
+        if np.any(mask):
+            filtered_importances = sorted_importances[mask]
+            filtered_mapped_names = [sorted_mapped_names[i] for i in range(len(sorted_mapped_names)) if mask[i]]
+            filtered_groups = [sorted_groups[i] for i in range(len(sorted_groups)) if mask[i]]
+            filtered_colors = [group_colors.get(g, '#7f7f7f') for g in filtered_groups]
+
+            plt.figure(figsize=(12, 6))
+            plt.rcParams['font.family'] = 'Arial'
+            plt.title(f"{cluster_name} {model_type} feature importance (>0.05)", fontsize=16)
+            plt.bar(range(len(filtered_mapped_names)), filtered_importances, color=filtered_colors)
+            plt.xticks(range(len(filtered_mapped_names)), filtered_mapped_names, rotation=45, ha='right', fontsize=14)
+            plt.tight_layout()
+
+            for fmt in self.fig_format:
+                path = self.get_figure_save_path(
+                    stage=stage,
+                    cluster_name=cluster_name,
+                    model_type=model_type,
+                    plot_type='feature_importance_filtered',
+                    fmt=fmt
+                )
+                plt.savefig(path, dpi=self.dpi, transparent=True)
+                logger.info(f"Saved filtered feature importance plot to {path}")
+            plt.close()
+        else:
+            logger.info(f"No features with importance > 0.05 for {cluster_name} {model_type} in {stage}.")
+
+    def plot_correlation_network(self, correlation_df: pd.DataFrame, cluster_name: str,
+                                 stage: Optional[str] = None,
+                                 group_assignments: Optional[Dict[str, str]] = None) -> None:
+        """
+        Plot a correlation network graph from the correlation DataFrame.
+        Only statistically significant correlations (after Bonferroni correction) are shown.
+        """
+        import networkx as nx
+        import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
+        import numpy as np
+
+        logger.info(f"Creating correlation network plot for {cluster_name}")
+
+        if correlation_df.empty:
+            logger.warning("Empty correlation DataFrame. Skipping network plot.")
+            return
+
+        df_sig = correlation_df[correlation_df["significant"]].copy()
+        if df_sig.empty:
+            logger.warning("No significant correlations to plot.")
+            return
+        
+        if group_assignments is None:
+            group_assignments = {}
+            all_features = {}
+            for _, row in df_sig.iterrows():
+                all_features[row['feature_a']] = row['feature_a']
+                all_features[row['feature_b']] = row['feature_b']
+            for feat in all_features:
+                group_assignments[feat] = self.infer_group_from_feature_name(feat)
+
+        for _, row in df_sig.iterrows():
+            for feat in [row['feature_a'], row['feature_b']]:
+                if feat not in group_assignments:
+                    group_assignments[feat] = self.infer_group_from_feature_name(feat)
+
+        group_colors = {'Pt_cluster': '#5571abff', 'interface': '#ed936bff', 'CeOx': '#7dc0a7ff'}
+
+        G = nx.Graph()
+        for _, row in df_sig.iterrows():
+            group_a = group_assignments.get(row['feature_a'], 'unknown')
+            group_b = group_assignments.get(row['feature_b'], 'unknown') 
+            mapped_a = self._map_feature_names([row['feature_a']])[0]
+            mapped_b = self._map_feature_names([row['feature_b']])[0]
+
+            node_a = f"{group_a}:{mapped_a}"
+            node_b = f"{group_b}:{mapped_b}"
+            G.add_node(node_a, group=group_a)
+            G.add_node(node_b, group=group_b)
+            G.add_edge(node_a, node_b, weight=abs(row["correlation"]), corr=row["correlation"])
+
+        if len(G.nodes) == 0:
+            logger.warning(f"No nodes in the graph for {cluster_name}. Skipping network plot.")
+            return
+
+        pos = nx.spring_layout(G, seed=42)
+        plt.rcParams["font.family"] = "Arial"
+        fig, ax = plt.subplots(figsize=(12, 10))
+
+        edges = G.edges(data=True)
+        corr_values = [data["corr"] for _, _, data in edges]
+        norm = mcolors.TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1)
+        cmap = cm.get_cmap("viridis")
+        edge_colors = [cmap(norm(corr)) for corr in corr_values]
+        edge_widths = [3 + 4 * abs(data["corr"]) for _, _, data in edges]
+
+        node_colors = [group_colors.get(node[1]['group'], '#7f7f7f') for node in G.nodes(data=True)]
+
+        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=600, edgecolors='k', alpha=0.7)
+        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, width=edge_widths)
+
+        label_pos = {k: (v[0], v[1] + 0.06) for k, v in pos.items()}
+        nx.draw_networkx_labels(G, label_pos, ax=ax, font_size=14, font_color='black',
+                                verticalalignment='bottom', horizontalalignment='center')
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, fraction=0.02, pad=0.04)
+        cbar.set_label('Pearson Correlation Coefficient', fontsize=16)
+
+        from matplotlib.patches import Patch
+        legend_elements = [Patch(facecolor=color, label=group) for group, color in group_colors.items()
+                            if any(node[1]['group'] in group_colors for node in G.nodes(data=True)) ]
+        legend_elements = [Patch(facecolor=color, label=group) for group, color in group_colors.items()]
+        plt.legend(handles=legend_elements, loc='upper right', fontsize=14, frameon=False)
+        plt.title(f"Significant Feature Correlation Network ({cluster_name})", fontsize=16)
+        plt.axis("off")
+        plt.tight_layout()
+
+        for fmt in self.config.get("fig_formats", ["png"]):
+            save_path = self.get_figure_save_path(
+                cluster_name=cluster_name,
+                stage=stage,
+                plot_type="correlation_network",
+                fmt=fmt
+            )
+            plt.savefig(save_path, dpi=self.dpi, transparent=True)
+            logger.info(f"Saved correlation network to {save_path}")
+        plt.close()
 
     def log_errors_by_threshold(
-            y_true, y_pred, X, structures, cluster_name, model_type, stage, threshold=2.0, save_dir="results/errors"):
+            self, y_true, y_pred, X, structures, cluster_name, model_type, stage, threshold=2.0, save_dir="results/errors"):
         """record errors by threshold"""
         import pandas as pd
         import os
@@ -1005,8 +1279,9 @@ class Visualizer:
         df_filtered.to_csv(save_path, index=False)
 
         print(f"[{cluster_name}][{model_type}] Saved {len(df_filtered)} error points to: {save_path}")
+        logger.info(f"[{cluster_name}][{model_type}] Saved {len(df_filtered)} error points to: {save_path}")
             
-         
+
 
 
 

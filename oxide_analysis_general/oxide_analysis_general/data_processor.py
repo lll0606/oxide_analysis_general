@@ -74,60 +74,6 @@ class DataProcessor:
         """
         return [col for col in self.feature_cols if col in data.columns]
     
-    # def prepare_modeling_data(self, data: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series, Optional[pd.Series]]:
-    #     """
-    #     Prepare data for modeling by extracting features and target
-    #     Args:
-    #         data: DataFrame containing the data
-    #     Returns:
-    #         Tuple of (features, target, structures)
-    #     """
-    #     if data is None:
-    #         logger.error("input data is None")
-    #         return None, None, None
-        
-    #     logger.info(f"prepare data and the shape: {data.shape}")
-
-        
-    #     # check if target column exists
-    #     if self.target_col not in data.columns:
-    #         logger.error(f"target col '{self.target_col}' not found in data")
-    #         return None, None, None
-        
-    #     # extract available features
-    #     available_features = self.get_available_features(data)
-        
-    #     # make sure the target column is numeric
-    #     numeric_features = [col for col in available_features 
-    #                     if pd.api.types.is_numeric_dtype(data[col])]
-        
-    #     # detelete the non-numeric features
-    #     data_clean = data.dropna(subset=numeric_features + [self.target_col])
-        
-    #     if len(data_clean) == 0:
-    #         logger.error("No valid data after cleaning")
-    #         return None, None, None
-        
-    #     # extract features and target
-    #     X = data_clean[numeric_features].copy()
-    #     logger.debug(f"feature type preview: {X.dtypes.head()}")
-    #     X = X.apply(pd.to_numeric, errors='coerce')
-    #     # check if there has non-numeric values
-    #     non_numeric_cols = X.select_dtypes(exclude=[np.number]).columns.tolist()
-    #     if non_numeric_cols:
-    #         logger.error(f"Non-numeric columns found: {non_numeric_cols}")
-
-    #     y = data_clean[self.target_col]
-        
-    #     # extract structures and information if available
-    #     if self.structure_col in data_clean.columns:
-    #         structures = data_clean[self.structure_col]
-    #         logger.info(f"structure col '{self.structure_col}' extracted successful, including {len(np.unique(structures))} kinds of structures")
-    #     else:
-    #         logger.warning(f"structure col '{self.structure_col}' not found in the data, available col is: {data_clean.columns.tolist()}")
-    #         structures = None
-        
-    #     return X, y, structures
 
     def prepare_modeling_data(self, data: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series, Optional[pd.Series]]:
         """
@@ -266,7 +212,7 @@ class DataProcessor:
             physics_features['binding_energy_combination'] = X['RMSD'] * X['Δq'] / ( X['polarons'] * X['ε'])
 
         # add clustering-based features
-        if X.shape[0] >= 30 and X.shape[1] >= 3:
+        if X.shape[0] >= 10 and X.shape[1] >= 3:
             try:
                 from sklearn.cluster import KMeans
                 from sklearn.preprocessing import StandardScaler
@@ -295,7 +241,7 @@ class DataProcessor:
         smart_config = self.config.get("smart_physical_feature", {})
         top_n = smart_config.get("top_n", 8)
         n_clusters = smart_config.get("n_clusters", 3)
-        max_total_features = smart_config.get("max_total_features", 30)
+        max_total_features = smart_config.get("max_total_features",10)
 
         logger.info("Using SMART physical feature construction (Pearson + Clustering)")
 
@@ -368,10 +314,20 @@ class DataProcessor:
         X_train = X_train.replace([np.inf, -np.inf], np.nan)
         if X_test is not None:
             X_test = X_test.replace([np.inf, -np.inf], np.nan)
+
+        # record original shape
+        orgin_train_shape = X_train.shape[0]
+        orgin_test_shape = X_test.shape[0] if X_test is not None else 0
+
         # Remove rows with NaN in essential columns
         X_train = X_train.dropna()
         if X_test is not None:
             X_test = X_test.dropna()
+        
+        #log how many rows are dropped
+        logger.info(f"[Scaling] X_train rows: {orgin_test_shape} -> {X_train.shape[0]} after dropna")
+        if X_test is not None:
+            logger.info(f"[Scaling] X_test rows: {orgin_test_shape} -> {X_test.shape[0]} after dropna")
         # record in the log
         bad_cols = X_train.columns[X_train.isna().any()].tolist()
         if len(bad_cols) > 0:

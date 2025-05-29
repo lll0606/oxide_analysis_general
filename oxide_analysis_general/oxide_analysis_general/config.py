@@ -138,46 +138,46 @@ DEFAULT_CONFIG = {
 # config.py
 from skopt.space import Integer, Real
 
-# PARAM_GRIDS = {
-#     'rf': {
-#         'n_estimators': list(range(10, 310, 50)),  
-#         'max_depth': list(range(1, 3)),
-#         'max_features': [round(x, 2) for x in np.linspace(0.05, 1.0, 2)]
-#     },
-#     'gb': {
-#         'n_estimators': list(range(50, 301, 150)),
-#         'max_depth': list(range(2, 11,5)),
-#         'learning_rate': [0.01, 0.05, 0.1, 0.2]
-#     },
-#     'xgb': {
-#         'n_estimators': list(range(50, 301, 150)),
-#         'max_depth': list(range(2, 11,5)),
-#         'learning_rate': [0.01, 0.05, 0.1, 0.2],
-#         'subsample': [0.5, 0.75, 1.0],
-#         'colsample_bytree': [0.5, 0.75, 1.0]
-#     },
-
-# }
 PARAM_GRIDS = {
     'rf': {
-        'n_estimators': list(range(10, 310, 10)),  
-        'max_depth': list(range(1, 16)),
-        'max_features': [round(x, 2) for x in np.linspace(0.05, 1.0, 20)]
+        'n_estimators': list(range(10, 310, 50)),  
+        'max_depth': list(range(1, 3)),
+        'max_features': [round(x, 2) for x in np.linspace(0.05, 1.0, 2)]
     },
     'gb': {
-        'n_estimators': list(range(50, 301, 50)),
-        'max_depth': list(range(2, 11)),
+        'n_estimators': list(range(50, 301, 150)),
+        'max_depth': list(range(2, 11,5)),
         'learning_rate': [0.01, 0.05, 0.1, 0.2]
     },
     'xgb': {
-        'n_estimators': list(range(50, 301, 50)),
-        'max_depth': list(range(2, 11)),
+        'n_estimators': list(range(50, 301, 150)),
+        'max_depth': list(range(2, 11,5)),
         'learning_rate': [0.01, 0.05, 0.1, 0.2],
         'subsample': [0.5, 0.75, 1.0],
         'colsample_bytree': [0.5, 0.75, 1.0]
     },
 
 }
+# PARAM_GRIDS = {
+#     'rf': {
+#         'n_estimators': list(range(10, 310, 10)),  
+#         'max_depth': list(range(1, 16)),
+#         'max_features': [round(x, 2) for x in np.linspace(0.05, 1.0, 20)]
+#     },
+#     'gb': {
+#         'n_estimators': list(range(50, 301, 50)),
+#         'max_depth': list(range(2, 11)),
+#         'learning_rate': [0.01, 0.05, 0.1, 0.2]
+#     },
+#     'xgb': {
+#         'n_estimators': list(range(50, 301, 50)),
+#         'max_depth': list(range(2, 11)),
+#         'learning_rate': [0.01, 0.05, 0.1, 0.2],
+#         'subsample': [0.5, 0.75, 1.0],
+#         'colsample_bytree': [0.5, 0.75, 1.0]
+#     },
+
+# }
 
 
 BAYES_GRIDS = {

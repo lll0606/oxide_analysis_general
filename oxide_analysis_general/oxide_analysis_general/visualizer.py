@@ -345,95 +345,169 @@ class Visualizer:
         
         plt.close()
     
-    def plot_scatter_contour(self, x_data: np.ndarray, y_data: np.ndarray, 
-                            z_data: np.ndarray, structures: np.ndarray = None,
-                            cluster_name: str = None,
-                            xlabel: str = 'X', ylabel: str = 'Y', zlabel: str = 'Z',
-                            title: str = 'Contour Plot', save_path: Path = None) -> None:
-        """
-        Create scatter plot with contour background
-        
-        Args:
-            x_data: X-axis data
-            y_data: Y-axis data
-            z_data: Z-axis data for contour colors
-            structures: Array of structure types
-            xlabel, ylabel, zlabel: Axis labels
-            title: Plot title
-            save_path: Path to save the plot
-        """
+    def plot_scatter_contour(self, x_data: np.ndarray, y_data: np.ndarray,
+                        z_data: np.ndarray,
+                        clusters: np.ndarray,
+                        structures: np.ndarray,
+                        xlabel: str = 'X', ylabel: str = 'Y', zlabel: str = 'Z',
+                        title: str = 'Contour Plot', save_path: Path = None) -> None:
         from scipy.interpolate import griddata
         import matplotlib.pyplot as plt
         import numpy as np
-        
+
+        # 固定颜色与 marker 映射（仅此改动）
+        COLOR_BY_CLUSTER = {
+            'Pt07': '#1f77b4',
+            'Pt13': '#7dc0a7ff'
+        }
+
+        MARKER_BY_STRUCTURE = {
+            'flat': 's',
+            'rod': '*',
+            '3d': 'o',
+            'bj': 'D',
+            'quasi': '^',
+            '2l': 'p'
+        }
+
         plt.figure(figsize=(10, 8))
-        
-        # Calculate overall data range
+
+        # 插值网格
         x_min, x_max = np.min(x_data), np.max(x_data)
         y_min, y_max = np.min(y_data), np.max(y_data)
-        
-        # Add margins to ranges
-        x_range = (x_max - x_min) * 0.1
-        y_range = (y_max - y_min) * 0.1
-        
-        x_min -= x_range
-        x_max += x_range
-        y_min -= y_range
-        y_max += y_range
-        
-        # Create grid for interpolation
-        x_grid = np.linspace(x_min, x_max, 500)
-        y_grid = np.linspace(y_min, y_max, 500)
+        x_margin = (x_max - x_min) * 0.1
+        y_margin = (y_max - y_min) * 0.1
+        x_grid = np.linspace(x_min - x_margin, x_max + x_margin, 500)
+        y_grid = np.linspace(y_min - y_margin, y_max + y_margin, 500)
         X, Y = np.meshgrid(x_grid, y_grid)
-        
-        # Use griddata for interpolation
+
+        # 插值 Z 值
         Z = griddata((x_data, y_data), z_data, (X, Y), method='linear')
-        # For cubic interpolation NaN values, fill with linear interpolation
-        if np.any(np.isnan(Z)):
-            Z_linear = griddata((x_data, y_data), z_data, (X, Y), method='linear')
-            mask = np.isnan(Z)
-            Z[mask] = Z_linear[mask]
-        
-        # Plot contour
+
+        # 绘制等高线背景
         z_min, z_max = np.floor(np.min(z_data)), np.ceil(np.max(z_data))
         contour_levels = np.linspace(z_min, z_max, 20)
         contour = plt.contourf(X, Y, Z, levels=contour_levels, cmap='viridis', alpha=0.7)
         cbar = plt.colorbar(contour)
         cbar.set_label(zlabel, fontsize=18)
-        cbar.ax.tick_params(labelsize=16)
-        
-        # Plot data points with structure colors if available
-        if structures is not None and cluster_name is not None:
-            from .config import COLORS, MARKERS
-            cluster_colors = COLORS.get(cluster_name, {})
-            for struct in np.unique(structures):
-                mask = structures == struct
-                color = cluster_colors.get(struct, '#777777')
-                structure_marker = MARKERS.get(struct, 'o')
-                plt.scatter(x_data[mask], y_data[mask], 
-                           label=f'{struct}', 
-                           color=color,
-                           marker=structure_marker,
-                           alpha=0.8, s=80, edgecolors='k')
-        else:
-            plt.scatter(x_data, y_data, alpha=0.8, s=80, edgecolors='k')
-            logger.info("No structures provided, using default color scheme")
-        
+        cbar.ax.tick_params(labelsize=18)
+
+        # ✅ 只改这一部分：颜色 = cluster，marker = structure
+        unique_pairs = sorted(set(zip(clusters, structures)))
+        for cluster, structure in unique_pairs:
+            mask = (clusters == cluster) & (structures == structure)
+            label = f"{structure} ({cluster})"
+            color = COLOR_BY_CLUSTER.get(cluster, '#777777')
+            marker = MARKER_BY_STRUCTURE.get(structure, 'o')
+            plt.scatter(x_data[mask], y_data[mask],
+                        label=label,
+                        color=color,
+                        marker=marker,
+                        alpha=0.8, s=120, edgecolors='k')
+
         plt.xlabel(xlabel, fontsize=20)
         plt.ylabel(ylabel, fontsize=20)
         plt.title(title, fontsize=22)
+        plt.legend(fontsize=14, loc='best')
         plt.tight_layout()
-        
-        if structures is not None:
-            plt.legend(fontsize=15, loc='best')
-            
-        if save_path: 
+
+        if save_path:
             base_path = save_path.with_suffix('')
             for fmt in self.config.get("fig_formats", ["png"]):
                 full_path = base_path.with_suffix(f'.{fmt}')
-                plt.savefig(full_path, dpi=self.config["dpi"], transparent=True)
+                plt.savefig(full_path, dpi=self.config.get("dpi", 300), transparent=True)
                 logger.info(f"Saved contour plot to {full_path}")
         plt.close()
+        
+    def create_comparison_visualizations(self, pt07_data: pd.DataFrame = pd.DataFrame(), 
+                                        pt13_data: pd.DataFrame = pd.DataFrame(), 
+                                        combined_data: pd.DataFrame = pd.DataFrame(),
+                                        pt07_results: Dict = {}, 
+                                        pt13_results: Dict = {}, 
+                                        combined_results: Dict = {}) -> None:
+        active_clusters = []
+        if not pt07_data.empty and pt07_results:
+            active_clusters.append('Pt07')
+        if not pt13_data.empty and pt13_results:
+            active_clusters.append('Pt13')
+        if not combined_data.empty and combined_results:
+            active_clusters.append('combined')
+
+        if not active_clusters:
+            logger.warning("No valid data available for comparison visualization")
+            return
+
+        data_map = {
+            'Pt07': pt07_data,
+            'Pt13': pt13_data,
+            'combined': combined_data
+        }
+
+        results_map = {
+            'Pt07': pt07_results,
+            'Pt13': pt13_results,
+            'combined': combined_results
+        }
+
+        valid_contour_clusters = []
+        for cluster in active_clusters:
+            data = data_map[cluster]
+            if all(col in data.columns for col in ['RMSD', 'Δq', 'ΔEads', 'structure', 'cluster']):
+                valid_contour_clusters.append(cluster)
+
+        if valid_contour_clusters:
+            for cluster in valid_contour_clusters:
+                data = data_map[cluster]
+                self.plot_scatter_contour(
+                    x_data=data['Δq'].values,
+                    y_data=data['RMSD'].values,
+                    z_data=data['ΔEads'].values,
+                    clusters=data['cluster'].values,
+                    structures=data['structure'].values,
+                    xlabel='Δq (e-)',
+                    ylabel='RMSD (Å)',
+                    zlabel='ΔEads (eV)',
+                    title=f'Δq vs RMSD with ΔEads ({cluster})',
+                    save_path=self.get_figure_save_path(
+                        cluster_name=cluster,
+                        stage='summary',
+                        model_type=None,
+                        plot_type='contour',
+                        fmt='png'
+                    )
+                )
+                logger.info(f"Contour plot created for {cluster}")
+
+            if len(valid_contour_clusters) > 1:
+                all_charge, all_rmsd, all_eads, all_structs, all_clusters = [], [], [], [], []
+                for cluster in valid_contour_clusters:
+                    data = data_map[cluster]
+                    all_charge.append(data['Δq'].values)
+                    all_rmsd.append(data['RMSD'].values)
+                    all_eads.append(data['ΔEads'].values)
+                    all_structs.append(data['structure'].values)
+                    all_clusters.append(data['cluster'].values)
+
+                self.plot_scatter_contour(
+                    x_data=np.concatenate(all_charge),
+                    y_data=np.concatenate(all_rmsd),
+                    z_data=np.concatenate(all_eads),
+                    clusters=np.concatenate(all_clusters),
+                    structures=np.concatenate(all_structs),
+                    xlabel='Δq (e-)',
+                    ylabel='RMSD (Å)',
+                    zlabel='ΔEads (eV)',
+                    title='Δq vs RMSD with ΔEads (Combined Comparison)',
+                    save_path=self.get_figure_save_path(
+                        cluster_name='combined_comparison',
+                        stage=None,
+                        model_type=None,
+                        plot_type='contour_summary',
+                        fmt='png'
+                    )
+                )
+                logger.info("Combined contour plot created for comparison")
+
 
     def plot_meta_model_coefficients(self, model, feature_names, cluster_name, model_type, stage = None):
         """
@@ -777,200 +851,6 @@ class Visualizer:
                     save_path=save_path
                 )
 
-    def create_comparison_visualizations(self, pt07_data: pd.DataFrame = pd.DataFrame(), 
-                                        pt13_data: pd.DataFrame = pd.DataFrame(), 
-                                        combined_data: pd.DataFrame = pd.DataFrame(),
-                                        pt07_results: Dict = {}, 
-                                        pt13_results: Dict = {}, 
-                                        combined_results: Dict = {}) -> None:
-        """
-        Create visualizations comparing different aspects of the analysis
-        Args:
-            pt07_data, pt13_data, combined_data: Raw data DataFrames
-            pt07_results, pt13_results, combined_results: Results dictionaries
-        """
-        # Identify which clusters have valid data
-        active_clusters = []
-        if not pt07_data.empty and pt07_results:
-            active_clusters.append('Pt07')
-        if not pt13_data.empty and pt13_results:
-            active_clusters.append('Pt13')
-        if not combined_data.empty and combined_results:
-            active_clusters.append('combined')
-        
-        if not active_clusters:
-            logger.warning("No valid data available for comparison visualization")
-            return
-        
-        # 1. RMSD vs Charge with ΔEads contour plot
-        data_map = {
-            'Pt07': pt07_data,
-            'Pt13': pt13_data,
-            'combined': combined_data
-        }
-        
-        results_map = {
-            'Pt07': pt07_results,
-            'Pt13': pt13_results,
-            'combined': combined_results
-        }
-        
-        # Check if required columns exist in active clusters
-        valid_contour_clusters = []
-        for cluster in active_clusters:
-            data = data_map[cluster]
-            if all(col in data.columns for col in ['RMSD', 'Δq', 'ΔEads', 'structure']):
-                valid_contour_clusters.append(cluster)
-        
-        if valid_contour_clusters:
-            # Extract and prepare data for individual contour plots
-            for cluster in valid_contour_clusters:
-                data = data_map[cluster]
-                rmsd = data['RMSD'].values
-                charge = data['Δq'].values
-                eads = data['ΔEads'].values
-                structs = data['structure'].values
-                
-                # Create individual contour plot
-                self.plot_scatter_contour(
-                    x_data=charge,
-                    y_data=rmsd,
-                    z_data=eads,
-                    structures=structs,
-                    cluster_name=cluster,
-                    xlabel='Δq (e-)',
-                    ylabel='RMSD (Å)',
-                    zlabel='ΔEads (eV)',
-                    title=f'Δq vs RMSD with ΔEads ({cluster})',
-                    save_path=self.get_figure_save_path(
-                        cluster_name=cluster,
-                        stage='summary',
-                        model_type=None,
-                        plot_type='contour',
-                        fmt='png'
-                    )
-                )
-                logger.info(f"Contour plot created for {cluster}")
-            
-            # Create combined contour plot if multiple clusters are active
-            if len(valid_contour_clusters) > 1:
-                all_rmsd = []
-                all_charge = []
-                all_eads = []
-                all_structs = []
-                
-                for cluster in valid_contour_clusters:
-                    data = data_map[cluster]
-                    all_rmsd.append(data['RMSD'].values)
-                    all_charge.append(data['Δq'].values)
-                    all_eads.append(data['ΔEads'].values)
-                    labeled_structs = np.array([f'{cluster}-{s}' for s in data['structure'].values])
-                    all_structs.append(labeled_structs)
-                
-                # Combine data for contour plot
-                combined_rmsd = np.concatenate(all_rmsd)
-                combined_charge = np.concatenate(all_charge)
-                combined_eads = np.concatenate(all_eads)
-                combined_structs = np.concatenate(all_structs)
-                
-                # Create contour plot
-                save_path = self.get_figure_save_path(
-                    cluster_name='combined_comparison',
-                    stage=None,
-                    model_type=None,
-                    plot_type='contour_summary',
-                    fmt='png'
-                )
-                
-                self.plot_scatter_contour(
-                    x_data=combined_charge,
-                    y_data=combined_rmsd,
-                    z_data=combined_eads,
-                    structures=combined_structs,
-                    cluster_name='combined_comparison',
-                    xlabel='Δq (e-)',
-                    ylabel='RMSD (Å)',
-                    zlabel='ΔEads (eV)',
-                    title='Δq vs RMSD with ΔEads (Combined Comparison)',
-                    save_path=save_path
-                )
-                logger.info("Combined contour plot created for comparison")
-
-        # 2. Model performance comparison across clusters
-        # Check if metrics are present in active clusters
-        valid_metrics_clusters = []
-        for cluster in active_clusters:
-            if 'metrics' in results_map[cluster]:
-                valid_metrics_clusters.append(cluster)
-        
-        if valid_metrics_clusters:
-            # Initialize lists to collect data for the DataFrame
-            models = []
-            datasets = []
-            r2_values = []
-            rmse_values = []
-            
-            # Collect metrics from each active cluster
-            for cluster in valid_metrics_clusters:
-                result = results_map[cluster]
-                metrics = result['metrics']
-                
-                for model_name in metrics:
-                    if isinstance(metrics[model_name], dict) and 'R²' in metrics[model_name] and 'RMSE' in metrics[model_name]:
-                        models.append(model_name)
-                        datasets.append(cluster)
-                        r2_values.append(metrics[model_name].get('R²', np.nan))
-                        rmse_values.append(metrics[model_name].get('RMSE', np.nan))
-            
-            # Create DataFrame only with available metrics
-            if models:
-                metrics_df = pd.DataFrame({
-                    'Model': models,
-                    'Dataset': datasets,
-                    'R²': r2_values,
-                    'RMSE': rmse_values
-                })
-                
-                # Remove any rows with NaN values
-                metrics_df = metrics_df.dropna()
-                
-                if not metrics_df.empty:
-                    # Plot R² comparison
-                    plt.figure(figsize=(12, 6))
-                    sns.barplot(x='Model', y='R²', hue='Dataset', data=metrics_df)
-                    plt.title('Model Performance Comparison (R²)', fontsize=16)
-                    plt.xlabel('Model', fontsize=14)
-                    plt.ylabel('R² Score', fontsize=14)
-                    plt.ylim(0, 1)
-                    plt.legend(title='Dataset')
-                    plt.tight_layout()
-                    base_path = FIGURES_DIR / "model_r2_comparison"
-                    for fmt in self.config.get("fig_formats", ["png"]):
-                        full_path = base_path.with_suffix(f'.{fmt}')
-                        plt.savefig(full_path, dpi=self.config["dpi"], transparent=True)
-                        logger.info(f"Saved R² comparison plot to {full_path}")
-                    plt.close()
-                    
-                    # Plot RMSE comparison
-                    plt.figure(figsize=(12, 6))
-                    sns.barplot(x='Model', y='RMSE', hue='Dataset', data=metrics_df)
-                    plt.title('Model Performance Comparison (RMSE)', fontsize=16)
-                    plt.xlabel('Model', fontsize=14)
-                    plt.ylabel('RMSE (eV)', fontsize=14)
-                    plt.legend(title='Dataset')
-                    plt.tight_layout()
-                    base_path = FIGURES_DIR / "model_rmse_comparison"
-                    for fmt in self.config.get("fig_formats", ["png"]):
-                        full_path = base_path.with_suffix(f'.{fmt}')
-                        plt.savefig(full_path, dpi=self.config["dpi"], transparent=True)
-                        logger.info(f"Saved RMSE comparison plot to {full_path}")
-                    plt.close()
-                else:
-                    logger.warning("No valid metrics data available for visualization after filtering NaN values")
-            else:
-                logger.warning("No metrics data available for visualization")
-        else:
-            logger.warning("Missing metrics dictionaries for comparison visualization")
 
     def infer_group_from_feature_name(self, feature_name: str) -> str:
         """

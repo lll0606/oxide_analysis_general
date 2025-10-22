@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="oxide_analysis_general",
-    version="0.1.2",
+    version="1.3.0",
     packages=find_packages(),
     install_requires=[
         "numpy>=1.20,<1.24",

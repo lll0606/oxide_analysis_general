@@ -30,6 +30,7 @@ from sklearn.linear_model import Ridge
 from sklearn.base import clone
 from sklearn.inspection import permutation_importance
 
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -40,9 +41,6 @@ class ModelTrainer:
     def __init__(self, config: Dict):
         """
         Initialize the model trainer with configuration
-        
-        Args:
-            config: Dictionary containing configuration parameters
         """
         self.config = config
         self.data_processor = DataProcessor(config)
@@ -58,12 +56,6 @@ class ModelTrainer:
         """
         Calculate R², RMSE, and MAE metrics
         
-        Args:
-            y_true: True target values
-            y_pred: Predicted target values
-        
-        Returns:
-            Dictionary with metric values
         """
         r2 = r2_score(y_true, y_pred)
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
@@ -79,19 +71,13 @@ class ModelTrainer:
         """
         Compute Pearson correlation and Bonferroni-corrected p-values between feature groups.
         If feature_groups is empty, it will infer group for each feature using infer_group_from_feature_name().
-
-        Args:
-            df: DataFrame containing the features and the target column.
-            feature_groups: A dictionary mapping group names to lists of feature names.
-
-        Returns:
-            A DataFrame containing correlations, p-values, and significance between groups.
         """
         from scipy.stats import pearsonr
         from statsmodels.stats.multitest import multipletests
 
         logger.info(f"[DEBUG] Starting correlation analysis")
         logger.debug(f"DataFrame columns: {df.columns.tolist()}")
+        df = df.select_dtypes(include=[np.number])
         logger.debug(f"Feature groups: {feature_groups}")
 
         # Automatically infer group assignments if not provided
@@ -170,12 +156,6 @@ class ModelTrainer:
     def analyze_feature_importance(self, model, feature_names, X=None, y=None):
         """
         Analyze feature importance for a model
-        Args:
-            model: Trained model
-            feature_names: List of feature names
-            X, y: Data for permutation importance (optional)
-        Returns:
-            Dictionary with feature importance information
         """
         feature_names = [f for f in feature_names if f in self.config.get("feature_names", [])]
         importance_data = {}
@@ -231,12 +211,6 @@ class ModelTrainer:
     def feature_contribution_analysis(self, model, X, feature_names):
         """
         Analyze how individual features contribute to predictions
-        Args:
-            model: Trained model
-            X: Feature matrix
-            feature_names: List of feature names
-        Returns:
-            Dictionary with feature contribution information
         """
         # This works best with tree-based models
         feature_names = [f for f in feature_names if f in self.config.get("feature_names", [])]
@@ -280,12 +254,6 @@ class ModelTrainer:
     def optimize_model_hyperparameters(self, X, y, model_type='rf', param_grid=None):
         """
         Optimize model hyperparameters using grid search
-        Args:
-            X: Feature matrix
-            y: Target vector
-            model_type: Type of model to optimize 
-        Returns:
-            Optimized model and best parameters
         """
         logger.info(f"Optimizing hyperparameters for {model_type} model")
         
@@ -365,13 +333,6 @@ class ModelTrainer:
     def bayesian_optimize_hyperparameters(self, X, y, model_type='rf', n_calls=30, param_space=None):
         """
         Optimize model hyperparameters using Bayesian optimization 
-        Args:
-            X: Feature matrix
-            y: Target vector
-            model_type: Type of model to optimize
-            n_calls: Number of optimization calls  
-        Returns:
-            Optimized model and best parameters
         """
         try:
             from skopt import BayesSearchCV
@@ -982,15 +943,6 @@ class ModelTrainer:
                              struct_train=None, struct_test=None, cluster_name=None):
         """
         Train a stacking ensemble model using pre-trained base models.
-        Args:
-            base_models (dict): Dictionary of base models {name: model}.
-            X_train (DataFrame): Feature matrix for training.
-            y_train (Series): Target vector for training.
-            X_test (DataFrame): Optional test features.
-            y_test (Series): Optional test labels.
-            cluster_name (str): For logging and saving results.
-        Returns:
-            dict: Contains final model, metrics, and base models.
         """
         import numpy as np
         from sklearn.model_selection import KFold, GridSearchCV

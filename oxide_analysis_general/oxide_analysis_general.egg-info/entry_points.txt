@@ -1,2 +1,0 @@
-[console_scripts]
-oxide-analysis-general = oxide_analysis_general.main:main

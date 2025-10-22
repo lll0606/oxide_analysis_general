@@ -9,11 +9,14 @@ from .data_processor import DataProcessor
 from .model_trainer import ModelTrainer
 from .visualizer import Visualizer
 from .oxide_analysis_general import OxideAnalysis
+from .validator import Validator
+
 
 __all__ = [
     'DataProcessor',
     'FeatureSelector',
     'ModelTrainer',
     'Visualizer',
-    'OxideAnalysis'
+    'OxideAnalysis',
+    'Validator'
 ]

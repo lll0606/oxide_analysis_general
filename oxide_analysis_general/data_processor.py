@@ -1,6 +1,5 @@
 """
 Data Processing Module for Oxide Descriptor Analysis
-
 This module provides functionality for loading, preprocessing, and creating
 physics-informed features for oxide descriptor data.
 """
@@ -23,29 +22,25 @@ class DataProcessor:
     def __init__(self, config: Dict):
         """
         Initialize the data processor with configuration
-        
-        Args:
-            config: Dictionary containing configuration parameters
         """
         self.config = config
         self.feature_cols = config["feature_cols"]
         self.target_col = config["target_col"]
         self.structure_col = config["structure_col"]
+        self.smart_feature_rules = None
         logger.info("Data processor initialized")
     
     def load_data(self, filename: str, sheet_name: str) -> pd.DataFrame:
         """
         Load and process Excel data
-        
-        Args:
-            filename: Path to the Excel file
-            sheet_name: Name of the sheet to load
-            
-        Returns:
-            Processed DataFrame
         """
         logger.info(f"Processing {sheet_name} data from {filename}")
         df = pd.read_excel(filename, sheet_name=sheet_name)
+
+        if isinstance(df, dict):
+            first_key = next(iter(df))
+            logger.warning(f"Excel file returned multiple sheets; using first sheet '{first_key}' by default.")
+            df = df[first_key]
         
         # Ensure data types are correct
         numeric_cols = [col for col in self.feature_cols + [self.target_col] 
@@ -65,12 +60,6 @@ class DataProcessor:
     def get_available_features(self, data: pd.DataFrame) -> List[str]:
         """
         Get available features from the configuration list that exist in the data
-        
-        Args:
-            data: DataFrame to check
-            
-        Returns:
-            List of available feature column names
         """
         return [col for col in self.feature_cols if col in data.columns]
     
@@ -87,48 +76,49 @@ class DataProcessor:
             logger.error("input data is None")
             return None, None, None
 
-        logger.info(f"📊 原始 data shape: {data.shape}")
-        logger.info(f"📌 初始 data.columns: {data.columns.tolist()}")
-        logger.info(f"📌 config['feature_cols']: {self.feature_cols}")
+        logger.info(f"original data shape: {data.shape}")
+        logger.info(f"original data.columns: {data.columns.tolist()}")
+        logger.info(f"original config['feature_cols']: {self.feature_cols}")
 
-        # 检查目标列是否存在
+        # check target column existence
         if self.target_col not in data.columns:
-            logger.error(f"❌ Target col '{self.target_col}' not found in data")
+            logger.error(f"Target column '{self.target_col}' not found in data")
             return None, None, None
 
-        # 确认哪些特征是存在的
+        # Check which features are available
         available_features = self.get_available_features(data)
-        logger.info(f"✅ 存在于 DataFrame 中的 feature_cols: {available_features}")
+        logger.info(f"the feature_cols in config: {self.feature_cols}")
+        logger.info(f" Available feature_cols in DataFrame: {available_features}")
 
-        # 检查哪些是数值型特征
+        # Check which features are numeric
         numeric_features = [col for col in available_features if pd.api.types.is_numeric_dtype(data[col])]
-        logger.info(f"🔢 被识别为数值型的特征列: {numeric_features}")
+        logger.info(f" Numeric feature columns: {numeric_features}")
 
-        # 检查缺失值情况
+        # Check for missing values
         missing_matrix = data[numeric_features + [self.target_col]].isna()
         missing_counts = missing_matrix.sum().to_dict()
-        logger.info(f"❗ 各列的缺失值数量: {missing_counts}")
+        logger.info(f"Missing values count: {missing_counts}")
 
-        # Drop 含缺失值的行
+        # Drop rows with missing values
         data_clean = data.dropna(subset=numeric_features + [self.target_col])
-        logger.info(f"🧹 dropna 之后的行数: {len(data_clean)}（共 {len(data)} 行）")
+        logger.info(f"Rows after dropna: {len(data_clean)} (total {len(data)} rows)")
 
         if len(data_clean) == 0:
-            logger.error("❌ 清洗后没有任何有效数据行")
+            logger.error("No data left after removing rows with missing values!!!")
             return None, None, None
 
-        # 提取特征和目标列
+        # Extract features and target
         X = data_clean[numeric_features].copy()
-        logger.info(f"📦 X.columns 最终提取出来的特征列: {X.columns.tolist()}")
+        logger.info(f"Extracted feature columns: {X.columns.tolist()}")
 
         y = data_clean[self.target_col]
 
-        # 提取结构信息（如果存在）
+        # Extract structure information (if exists)
         if self.structure_col in data_clean.columns:
             structures = data_clean[self.structure_col]
-            logger.info(f"🏗️ 结构列 '{self.structure_col}' 提取成功，共包含 {len(np.unique(structures))} 类结构")
+            logger.info(f"Structure column '{self.structure_col}' extracted successfully, containing {len(np.unique(structures))} unique structures")
         else:
-            logger.warning(f"⚠️ 结构列 '{self.structure_col}' 未找到，当前所有列为: {data_clean.columns.tolist()}")
+            logger.warning(f"Structure column '{self.structure_col}' not found, current columns are: {data_clean.columns.tolist()}")
             structures = None
 
         return X, y, structures
@@ -229,7 +219,7 @@ class DataProcessor:
         logger.info(f"New physics features: {physics_features.columns.tolist()}") 
         return X_physics
 
-    def create_physics_features_smart(self, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
+    def create_physics_features_smart(self, X: pd.DataFrame, y: pd.Series, fit: bool = True) -> pd.DataFrame:
         """
         Construct physics-informed features using smart selection + clustering.
         Parameters taken from config["smart_physical_feature"]
@@ -241,37 +231,47 @@ class DataProcessor:
         smart_config = self.config.get("smart_physical_feature", {})
         top_n = smart_config.get("top_n", 8)
         n_clusters = smart_config.get("n_clusters", 3)
-        max_total_features = smart_config.get("max_total_features",10)
+        max_total_features = smart_config.get("max_total_features",20)
 
-        logger.info("Using SMART physical feature construction (Pearson + Clustering)")
+        if fit or self.smart_feature_rules is None:
+            logger.info("Using SMART physical feature construction (Pearson + Clustering)")
 
-        # Step 1: choose top-N features based on correlation with the target variable
-        scores = []
-        for col in X.columns:
-            try:
-                r, _ = pearsonr(X[col], y)
-                scores.append((col, abs(r)))
-            except:
-                continue
-        top_features = [col for col, _ in sorted(scores, key=lambda x: x[1], reverse=True)[:top_n]]
-        logger.info(f"Top-{top_n} correlated features: {top_features}")
+            # Step 1: choose top-N features based on correlation with the target variable
+            scores = []
+            for col in X.columns:
+                try:
+                    r, _ = pearsonr(X[col], y)
+                    scores.append((col, abs(r)))
+                except:
+                    continue
+            top_features = [col for col, _ in sorted(scores, key=lambda x: x[1], reverse=True)[:top_n]]
+            logger.info(f"Top-{top_n} correlated features: {top_features}")
 
-        # Step 2: cluster the top features based on their pairwise correlation
-        corr_matrix = X[top_features].corr().abs()
-        dist_matrix = 1 - corr_matrix
-        # get the number of features
-        n_features = dist_matrix.shape[0]
-        n_clusters_safe = min(n_clusters, n_features)
-        # if the feature number is too small,then skip the cluster just use the original features
-        if n_clusters_safe < 2:
-            logger.warning(f"[create_physics_features_smart] Not enough features {n_features} to cluster, using original features")
-            feature_groups = {f: 0 for f in top_features}
+            # Step 2: cluster the top features based on their pairwise correlation
+            corr_matrix = X[top_features].corr().abs()
+            dist_matrix = 1 - corr_matrix
+            n_features = dist_matrix.shape[0]
+            n_clusters_safe = min(n_clusters, n_features)
+            # if the feature number is too small,then skip the cluster just use the original features
+            if n_clusters_safe < 2:
+                logger.warning(f"[create_physics_features_smart] Not enough features {n_features} to cluster, using original features")
+                feature_groups = {f: 0 for f in top_features}
+            else:
+                clustering = AgglomerativeClustering(n_clusters=n_clusters_safe, metric='precomputed', linkage='average')
+                labels = clustering.fit_predict(dist_matrix)
+                feature_groups = {f: int(l) for f, l in zip(top_features, labels)}
+                logger.info(f"Feature groups after clustering: {feature_groups}")
+            # save the feature groups
+            self.smart_feature_rules = {
+                "top_features": top_features,
+                "feature_groups": feature_groups,
+                "max_total_features": max_total_features
+            }
         else:
-            clustering = AgglomerativeClustering(n_clusters=n_clusters_safe, metric='precomputed', linkage='average')
-            labels = clustering.fit_predict(dist_matrix)
-            feature_groups = {f: int(l) for f, l in zip(top_features, labels)}
-        logger.info(f"Feature clusters: {feature_groups}")
-
+            logger.info("Applying previously fitted SMART feature rules")
+            top_features = self.smart_feature_rules['top_features']
+            feature_groups = self.smart_feature_rules['feature_groups']
+            max_total_features = self.smart_feature_rules['max_total_features']
         # Step 3: combine features from different clusters
         new_features = pd.DataFrame(index=X.index)
         combination_count = 0
@@ -282,7 +282,7 @@ class DataProcessor:
                     if combination_count + 3 > max_total_features:
                         logger.warning(f"Reached maximum allowed physical features: {max_total_features}")
                         break
-                    new_features[f"{f1}x{f2}"] = X[f1] * X[f2]
+                    new_features[f"{f1}_x_{f2}"] = X[f1] * X[f2]
                     new_features[f"{f1}/{f2}"] = X[f1] / (X[f2] + 1e-6)
                     new_features[f"{f1}-{f2}"] = X[f1] - X[f2]
                     combination_count += 3
@@ -292,11 +292,11 @@ class DataProcessor:
         logger.info(f"Final SMART physical features: {X_combined.shape[1]} columns created")
         return X_combined
 
-    def create_physics_features(self, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
+    def create_physics_features(self, X: pd.DataFrame, y: pd.Series, fit: bool = True) -> pd.DataFrame:
         smart_config = self.config.get("smart_physical_feature", {})
         use_smart = smart_config.get("use_smart", True)
         if use_smart:
-            return self.create_physics_features_smart(X, y)
+            return self.create_physics_features_smart(X, y,fit=fit)
         else:
             return self.create_physics_features_manual(X)
 

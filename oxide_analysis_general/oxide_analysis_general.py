@@ -1,9 +1,5 @@
 """
 Oxide Analysis Module - Main coordinator for oxide descriptor analysis workflow
-
-This module provides the main OxideAnalysis class that orchestrates the entire
-analysis workflow, from data loading and preprocessing through model training,
-evaluation, and visualization.
 """
 
 import numpy as np
@@ -17,6 +13,7 @@ from pathlib import Path
 import re
 from scipy.stats import pearsonr
 import time
+import pickle
 
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
@@ -30,6 +27,12 @@ from .model_trainer import ModelTrainer
 from .visualizer import Visualizer
 from .config import DEFAULT_CONFIG, COLORS, MARKERS, FIGURES_DIR, ANALYSIS_DIR, PARAM_GRIDS, ACTIVE_CLUSTERS, FEATURE_GROUPS,FEATURE_NAME_MAP
 
+plt.rcParams['svg.fonttype'] = 'none'
+plt.rcParams['text.usetex'] = False
+plt.rcParams['font.family'] = 'Arial'
+# Set Seaborn context
+sns.set_context("notebook")
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -38,8 +41,6 @@ class OxideAnalysis:
     def __init__(self, config: Dict = None):
         """
         Initialize the analysis workflow
-        Args:
-            config: Configuration dictionary (optional)
         """
         # Use provided config or default
         self.config = config if config else DEFAULT_CONFIG
@@ -79,23 +80,23 @@ class OxideAnalysis:
         if 'Pt07' in ACTIVE_CLUSTERS and not pt07_data.empty:
             X_pt07_raw, y_pt07, structures_pt07 = self.data_processor.prepare_modeling_data(pt07_data)
             if X_pt07_raw is not None:
-                X_pt07_physics = self.data_processor.create_physics_features(X_pt07_raw, y_pt07)
-                X_pt07_scaled, _, pt07_scaler = self.data_processor.scale_features(X_pt07_physics, method='robust')
-                modeling_data['Pt07'] = (X_pt07_raw,X_pt07_physics, X_pt07_scaled, y_pt07, structures_pt07)
+                # X_pt07_physics = self.data_processor.create_physics_features(X_pt07_raw, y_pt07)
+                X_pt07_scaled, _, pt07_scaler = self.data_processor.scale_features(X_pt07_raw, method='robust')
+                modeling_data['Pt07'] = (X_pt07_raw, None, X_pt07_scaled, y_pt07, structures_pt07)
         
         if 'Pt13' in ACTIVE_CLUSTERS and not pt13_data.empty:
             X_pt13_raw, y_pt13, structures_pt13 = self.data_processor.prepare_modeling_data(pt13_data)
             if X_pt13_raw is not None:
-                X_pt13_physics = self.data_processor.create_physics_features(X_pt13_raw, y_pt13)
-                X_pt13_scaled, _, pt13_scaler = self.data_processor.scale_features(X_pt13_physics, method='robust')
-                modeling_data['Pt13'] = (X_pt13_raw, X_pt13_physics, X_pt13_scaled, y_pt13, structures_pt13)
+                # X_pt13_physics = self.data_processor.create_physics_features(X_pt13_raw, y_pt13)
+                X_pt13_scaled, _, pt13_scaler = self.data_processor.scale_features(X_pt13_raw, method='robust')
+                modeling_data['Pt13'] = (X_pt13_raw, None, X_pt13_scaled, y_pt13, structures_pt13)
         
         if 'combined' in ACTIVE_CLUSTERS and not combined_data.empty:
             X_combined_raw, y_combined, structures_combined = self.data_processor.prepare_modeling_data(combined_data)
             if X_combined_raw is not None:
-                X_combined_physics = self.data_processor.create_physics_features(X_combined_raw, y_combined)
-                X_combined_scaled, _, combined_scaler = self.data_processor.scale_features(X_combined_physics, method='robust')
-                modeling_data['combined'] = (X_combined_raw, X_combined_physics, X_combined_scaled, y_combined, structures_combined)
+                # X_combined_physics = self.data_processor.create_physics_features(X_combined_raw, y_combined)
+                X_combined_scaled, _, combined_scaler = self.data_processor.scale_features(X_combined_raw, method='robust')
+                modeling_data['combined'] = (X_combined_raw, None, X_combined_scaled, y_combined, structures_combined)
         
         return modeling_data
 
@@ -182,7 +183,8 @@ class OxideAnalysis:
             'models': selected_results.get('models', {}),
             'scores': selected_results.get('scores', {}),
             'params': selected_results.get('params', {}),
-            'optimzation_results': selected_results.get('optimzation_results', {})
+            'optimzation_results': selected_results.get('optimzation_results', {}),
+            'selected_features': selected_features
         }
     
     def _train_on_stacking_model(self, selected_results, X_train, y_train,X_test, y_test, 
@@ -235,8 +237,6 @@ class OxideAnalysis:
                 'name': best_model_name,
                 'r2': best_r2,
                 'metrics': model_results[best_model_name]['test_metrics']}
-      
-
     def _save_results(self, results: Dict) -> None:
         """save the results to the analysis directory"""
         try:
@@ -251,24 +251,24 @@ class OxideAnalysis:
                 if dataset not in results:
                     logger.warning(f"Dataset {dataset} not found in results")
                     continue
-                    
-                # 检查metrics键是否存在
+
+                # check if metrics key exists
                 if 'metrics' in results[dataset]:
                     for model_name, metrics in results[dataset]['metrics'].items():
                         metrics_summary[dataset][model_name] = metrics
-                
-                # 安全地访问best_model
+
+                # safely access best_model
                 if 'best_model' in results[dataset]:
                     best_model = results[dataset]['best_model']
                     if isinstance(best_model, dict) and 'name' in best_model and 'metrics' in best_model:
                         metrics_summary[dataset][f"Best ({best_model['name']})"] = best_model['metrics']
-            
-            # 检查combined_models键是否存在
+
+            # check if combined_models key exists
             if 'combined' in results and 'combined_models' in results['combined']:
                 for model_name, metrics in results['combined']['combined_models'].items():
                     metrics_summary['combined'][model_name] = metrics
-            
-            # 创建DataFrame并保存
+
+            # create DataFrame and save
             metrics_df = pd.DataFrame()
             
             for dataset in metrics_summary:
@@ -280,17 +280,17 @@ class OxideAnalysis:
                         'RMSE (eV)': metrics.get('RMSE', None)
                     }
                     metrics_df = pd.concat([metrics_df, pd.DataFrame([row])], ignore_index=True)
-            
-            # 只有在有数据时才保存
+
+            # only save if there is data
             if not metrics_df.empty:
                 metrics_df.to_csv(ANALYSIS_DIR / 'model_metrics_summary.csv', index=False)
-            
-            # 写入Markdown报告，添加错误检查
+
+            # Write Markdown report with error checking
             with open(ANALYSIS_DIR / 'analysis_summary.md', 'w') as f:
                 f.write(f"# Oxide Descriptor Analysis Summary\n\n")
                 f.write(f"Analysis Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                
-                # 表格性能部分
+
+                # Performance section
                 f.write("## Overall Performance\n\n")
                 f.write("| Dataset | Model | R² | RMSE (eV) |\n")
                 f.write("|---------|-------|------|----------|\n")
@@ -299,15 +299,15 @@ class OxideAnalysis:
                     for model_name, metrics in metrics_summary[dataset].items():
                         r2 = metrics.get('R²', 'N/A')
                         rmse = metrics.get('RMSE', 'N/A')
-                        
-                        # 格式化值
+
+                        # Format values
                         r2_formatted = f"{r2:.4f}" if isinstance(r2, (float, int)) else r2
                         rmse_formatted = f"{rmse:.4f}" if isinstance(rmse, (float, int)) else rmse
                         
                         f.write(f"| {dataset} | {model_name} | {r2_formatted} | {rmse_formatted} |\n")
-                
-                # 特征重要性部分
-                f.write("\n## Important Features\n\n")
+
+                # Feature Importance section
+                f.write("## Important Features\n\n")
                 for dataset in ['Pt07', 'Pt13', 'combined']:
                     if dataset in results and 'best_model' in results[dataset]:
                         best_model = results[dataset]['best_model']
@@ -318,8 +318,8 @@ class OxideAnalysis:
                             if hasattr(model, 'feature_importances_') and 'selected_features' in results[dataset]:
                                 features = results[dataset]['selected_features']
                                 importances = model.feature_importances_
-                                
-                                # 确保长度一致
+
+                                # Ensure consistent length
                                 if len(importances) > len(features):
                                     importances = importances[:len(features)]
                                 elif len(features) > len(importances):
@@ -329,22 +329,22 @@ class OxideAnalysis:
                                     f.write(f"### {dataset} Top Features ({model_name})\n\n")
                                     f.write("| Feature | Importance |\n")
                                     f.write("|---------|------------|\n")
-                                    
-                                    # 获取特征重要性
+
+                                    # Get feature importances
                                     indices = np.argsort(importances)[::-1]
-                                    
-                                    # 显示前10个特征
+
+                                    # Show top 10 features
                                     for i in range(min(10, len(features))):
                                         if i < len(indices):
                                             idx = indices[i]
                                             if idx < len(features):
                                                 f.write(f"| {features[idx]} | {importances[idx]:.4f} |\n")
-                
-                # 结论部分
+
+                # Conclusion section
                 f.write("\n## Conclusion\n\n")
                 f.write("Based on the analysis, the following observations can be made:\n\n")
-                
-                # 检查模型是否达到目标性能
+
+                # Check if models met target performance
                 best_model_info = []
                 for dataset in ['Pt07', 'Pt13', 'combined']:
                     if dataset in results and 'best_model' in results[dataset]:
@@ -353,10 +353,10 @@ class OxideAnalysis:
                             best_r2 = best_model['metrics'].get('R²', 0)
                             best_model_info.append((dataset, best_r2))
                 
-                # 按R²排序
+                # order as r2
                 best_model_info.sort(key=lambda x: x[1], reverse=True)
                 
-                # 基于R²添加结论
+                #  add more conclustion based on r2
                 for dataset, r2 in best_model_info:
                     model_name = results[dataset]['best_model']['name']
                     if r2 >= 0.95:
@@ -402,7 +402,6 @@ class OxideAnalysis:
             if not moved:
                 logger.debug(f"Kept {file.name} in figures/ (not baseline/optimized/stacking)")
 
-
     def _analyze_cluster(self, X_raw, X_physics, X_scaled, y, structures, cluster_name):
         """
         Analyze a single cluster: (all need to do hyperparameter tuning fisrt training)
@@ -412,7 +411,8 @@ class OxideAnalysis:
         """
 
         logger.info(f"Analyzing {cluster_name}, targeting R²=0.95")
-        logger.info(f"X_physics type: {type(X_physics)}, shape: {X_physics.shape}")
+        logger.info(f"X_raw type: {type(X_raw)}, shape: {X_raw.shape}")
+        # logger.info(f"X_physics type: {type(X_physics)}, shape: {X_physics.shape}")
         logger.info(f"X_scaled type: {type(X_scaled)}, shape: {X_scaled.shape}")
         logger.info(f"y type: {type(y)}, shape: {y.shape}")
         logger.info(f"structures type: {type(structures)}, shape: {structures.shape}")
@@ -450,16 +450,18 @@ class OxideAnalysis:
         # === stage 2 === Train standard models with selected features and hyperparameter tuning
         if self.config.get("train_on_selected_features", True):
             logger.info(f"[{cluster_name}] for Stage 2: train standard models with constructed+raw features and hyperparameter tuning")
-            X_physics_train = self.data_processor.create_physics_features(X_raw_train, y_train)
-            X_physics_test = self.data_processor.create_physics_features(X_raw_test, y_test)
+            X_physics_train = self.data_processor.create_physics_features(X_raw_train, y_train,fit=True)
+            X_physics_test = self.data_processor.create_physics_features(X_raw_test, y_test,fit=False)
             logger.info(f"X_physics_train_columns: {X_physics_train.columns.tolist()}")
+            logger.info(f"X_physics_test_columns: {X_physics_test.columns.tolist()}")
+            # Ensure the physical features are consistent between train and test sets
             common_features = sorted(list(set(X_physics_train.columns) & set(X_physics_test.columns)))
             logger.info(f"[{cluster_name}] Common physical features used: {common_features}")
             X_physics_train = X_physics_train[common_features]
             X_physics_test = X_physics_test[common_features]
 
             #plot the pearson heatmap with updated feature names
-            # ✅ add correlation network for physical features with dynamic group inference
+            #add correlation network for physical features with dynamic group inference
             Xy_physics = X_physics_train.assign(**{self.config['target_col']: y_train})
             group_assignments = {}
             for col in Xy_physics.columns:
@@ -479,14 +481,14 @@ class OxideAnalysis:
                 Xy_physics, feature_groups=dynamic_feature_groups
             )
             if not corr_df_physics.empty and corr_df_physics["significant"].any():
-                # 仅在存在显著性时绘制
+                # only plot if significant correlations exist
                 self.visualizer.plot_correlation_network(
-                    corr_df_physics, cluster_name + "_physics", stage="optimized",
+                    corr_df_physics, cluster_name + "_physics",
                     group_assignments=group_assignments
                 )
             else:
                 logger.warning(f"No significant correlations found in {cluster_name} for physical features.")
-            self.visualizer.plot_pearson_correlation(Xy_physics, cluster_name + "_physics")
+            self.visualizer.plot_pearson_correlation(Xy_physics, cluster_name + "_physics", stage='stage2')
 
             results['selected'] = self._train_models_on_selected_features(
                 X_physics_train, y_train, X_physics_test, y_test,
@@ -511,7 +513,6 @@ class OxideAnalysis:
             )  
         return results
 
-
     def run_analysis(self, data_file: str) -> Dict:
         """Run the complete analysis workflow"""
         logger.info(f"Starting analysis with {data_file}")
@@ -528,7 +529,7 @@ class OxideAnalysis:
         }
         for cluster_name in ACTIVE_CLUSTERS:
             if cluster_name in data_map and not data_map[cluster_name].empty:
-                self.visualizer.plot_pearson_correlation(data_map[cluster_name], cluster_name)
+                self.visualizer.plot_pearson_correlation(data_map[cluster_name], cluster_name,stage='stage1' )
         
         # Prepare modeling data
         modeling_data = self._prepare_all_modeling_data(pt07_data, pt13_data, combined_data)
@@ -585,6 +586,44 @@ class OxideAnalysis:
         total_minutes = total_time / 60
         logger.info(f"Total time taken: {total_minutes:.2f} minutes")
         logger.info(f"Total time taken: {total_time:.2f} seconds")
+
+        # save the modeling results in case needed to validate later
+        model_save_path = Path ('results/model') 
+        model_save_path.mkdir(parents=True, exist_ok=True)
+
+        if 'combined' in filtered_results:
+            if 'selected' in filtered_results['combined']:
+                selected_data = filtered_results['combined'].get('selected', {})
+
+                if 'models' in selected_data:
+                    for model_name, model_obj in selected_data['models'].items():
+                        if model_obj is not None:
+                            metrics = selected_data['scores'].get(model_name, {})
+                            logger.info(f"Combined model: {model_name}, Test Metrics: {metrics}")
+
+
+                            save_path = model_save_path / f'combined_{model_name}_model.pkl'
+                            with open(save_path, 'wb') as f:
+                                pickle.dump(model_obj,f)
+                                # pickle.dump(model_obj['model'], f)
+                            logger.info(f"Saved combined model {model_name} to {save_path}")
+                
+                ## save the features
+                if 'selected_features' in selected_data:
+                    save_path = model_save_path / f'combined_selected_features.pkl'
+                    with open(save_path, 'wb') as f:
+                        pickle.dump(selected_data['selected_features'],f)
+                    logger.info(f"Saved combined selected features to {save_path}")
+            
+                ## save scaler
+                if hasattr(self.data_processor, 'combined_scaler'):
+                    save_path = model_save_path / f'combined_scaler.pkl'
+                    with open(save_path, 'wb') as f:
+                        pickle.dump(self.data_processor.combined_scaler,f)
+                    logger.info(f"Saved combined scaler to {save_path}")
+
+        logger.info("Model saving completed.")
+
         return filtered_results
     
 

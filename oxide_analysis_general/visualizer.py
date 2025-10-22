@@ -15,7 +15,6 @@ from pathlib import Path
 from scipy.stats import pearsonr
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
-
 # Import from local config
 from .config import DEFAULT_CONFIG, COLORS, MARKERS, FIGURES_DIR, ANALYSIS_DIR, PARAM_GRIDS, FEATURE_NAME_MAP
 
@@ -45,15 +44,19 @@ class Visualizer:
                 base_feat = feat_fixed[4:]
                 mapped_base = name_map.get(base_feat, base_feat)
                 mapped_feat = f"Inverse {mapped_base}"
-            elif '_x_' in feat_fixed or 'x' in feat_fixed:
-                sep = '_x_' if '_x_' in feat_fixed else 'x'
-                parts = feat_fixed.split(sep)
-                mapped_parts = []
-                for part in parts:
-                    part = part.strip()
-                    mapped_part = name_map.get(part, part)
-                    mapped_parts.append(mapped_part)
-                mapped_feat = " x ".join(mapped_parts) 
+            elif '_x_' in feat_fixed:
+                parts = [name_map.get(p.strip(), p.strip())
+                        for p in feat_fixed.split('_x_')]
+                mapped_feat = ' x '.join(parts)
+            # elif '_x_' in feat_fixed:
+            #     sep = '_x_' if '_x_' in feat_fixed else 'x'
+            #     parts = feat_fixed.split(sep)
+            #     mapped_parts = []
+            #     for part in parts:
+            #         part = part.strip()
+            #         mapped_part = name_map.get(part, part)
+            #         mapped_parts.append(mapped_part)
+            #     mapped_feat = " x ".join(mapped_parts) 
             elif '/' in feat_fixed:
                 parts = feat_fixed.split('/')
                 mapped_parts = []
@@ -85,21 +88,33 @@ class Visualizer:
         return mapped_names
 
     def set_plot_style(self):
-        """Set the default plot style"""
+        """Set unified matplotlib + seaborn plot style for all figures"""
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+
+        # Base style
         plt.style.use('default')
+
+        # Matplotlib rcParams
         plt.rcParams.update({
-            'font.family': 'Arial',
-            'font.size': 18,                       
-            'axes.labelsize': 18,       
-            'axes.titlesize': 20,       
-            'xtick.labelsize': 18,      
-            'ytick.labelsize': 18,      
+            'svg.fonttype': 'none',         # Make SVG text editable
+            'text.usetex': False,           # Avoid requiring LaTeX installation
+            'font.family': 'Arial',         # Use Arial everywhere
+            'font.size': 18,
+            'axes.labelsize': 18,
+            'axes.titlesize': 20,
+            'xtick.labelsize': 18,
+            'ytick.labelsize': 18,
             'axes.labelcolor': 'black',
             'xtick.color': 'black',
             'ytick.color': 'black',
-            'text.color': 'black'
+            'text.color': 'black',
+            'figure.dpi': self.dpi          # Use configured dpi for consistency
         })
 
+        # Seaborn context
+        sns.set_context("notebook")         # Options: paper, notebook, talk, poster
+        
     def get_figure_save_path(self, stage=None, 
                              model_type=None, 
                              plot_type=None, cluster_name=None, fmt="png", base_dir=FIGURES_DIR):
@@ -122,12 +137,13 @@ class Visualizer:
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
-    def plot_pearson_correlation(self, data: pd.DataFrame, cluster_name: str, 
+    def plot_pearson_correlation(self, data: pd.DataFrame, cluster_name: str, stage: str = 'stage1',
                                 save_dir: Path = FIGURES_DIR) -> None:
         """
-        Plot Pearson correlation heatmap 
+        Plot Pearson correlation heatmap for specified features (Stage 1) 
+        or physics-informed combined features (Stage 2).
         """
-        logger.info(f"Creating Pearson correlation heatmap for {cluster_name}")
+        logger.info(f"Creating Pearson correlation heatmap for {cluster_name}, {stage}")
 
         target_col = self.config["target_col"]
         feature_cols = self.config["feature_cols"]
@@ -142,24 +158,47 @@ class Visualizer:
         else:
             feature_cols = [col for col in candidate_features if any(base in col for base in feature_cols)]
 
-        feature_cols = [col for col in feature_cols if col in data.columns]
+        if stage == 'stage1':
+            # Stage 1: use original top features only
+            feature_cols = [
+                col for col in self.config["feature_cols"]
+                if col in data.columns and pd.api.types.is_numeric_dtype(data[col])
+            ]
+        elif stage == 'stage2':
+            # Stage 2: use top features and new combined features (explicitly consider combination rules in visualizer)
+            combination_symbols = ['_x_', '/', '-']
+            top_features = [
+                col for col in self.config["feature_cols"]
+                if col in data.columns and pd.api.types.is_numeric_dtype(data[col])
+            ]
+            new_combined_features = [
+                col for col in data.columns 
+                if col != target_col and pd.api.types.is_numeric_dtype(data[col])
+                and any(sym in col for sym in combination_symbols)
+            ]
+            feature_cols = top_features + new_combined_features
+        else:
+            logger.error(f"Invalid stage '{stage}' specified. Choose 'stage1' or 'stage2'.")
+            return
+
+        if not feature_cols:
+            logger.error("No valid numeric features available for plotting.")
+            return
+
         data_clean = data.dropna(subset=[target_col] + feature_cols)
         mapped_feature_cols = self._map_feature_names(feature_cols)
         mapped_target_col = self._map_feature_names([target_col])[0]
+
         data_corr = data_clean[[target_col] + feature_cols].copy()
         data_corr.columns = [mapped_target_col] + mapped_feature_cols
         corr_matrix = data_corr.corr(method='pearson')
-        # mapped_cols = self._map_feature_names(feature_cols)
-        # mapped_target = self._map_feature_names([target_col])[0]
-        # corr_matrix.columns = [mapped_target] + mapped_cols
-        # corr_matrix.index = [mapped_target] + mapped_cols
 
         mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
         figsize_base = 10
         num_features = len(feature_cols)
         dynamic_size = figsize_base + num_features * 0.5
         fig, ax = plt.subplots(figsize=(dynamic_size, dynamic_size))
-        # fig, ax = plt.subplots(figsize=(14, 12))
+
         cmap = plt.cm.viridis
         sns.heatmap(
             corr_matrix, 
@@ -173,22 +212,23 @@ class Visualizer:
             linewidths=0.5,
             annot_kws={"size": 10},
             ax=ax)
-        
 
-        plt.title(f"Pearson Correlation Matrix - {cluster_name}", fontsize=18)
+        plt.title(f"Pearson Correlation Matrix - {cluster_name} ({stage})", fontsize=18)
         plt.xticks(rotation=45, ha='right', fontsize=14)
         plt.yticks(fontsize=14)
         plt.tight_layout()
+
         for fmt in self.config.get("fig_formats", ["png"]):
             save_path = self.get_figure_save_path(
-                cluster_name=cluster_name, plot_type='Pearson_correlation', fmt=fmt
-                )
+                cluster_name=cluster_name, plot_type=f'Pearson_correlation_{stage}', fmt=fmt
+            )
             plt.savefig(save_path, dpi=self.dpi, transparent=True)
             logger.info(f"Saved Pearson correlation heatmap to {save_path}")
         plt.close()
-        
+
         # Create scatter plots for key relationships
         self.plot_key_correlations(data_clean, cluster_name, save_dir)
+
 
     def plot_key_correlations(self, data: pd.DataFrame, cluster_name: str, save_dir: Path = FIGURES_DIR) -> None:
         """
@@ -260,12 +300,6 @@ class Visualizer:
                    save_path = None) -> None:
         """
         Create parity plot (actual vs predicted)
-        Args:
-            y_true: True target values
-            y_pred: Predicted target values
-            structures: Array of structure types for coloring points
-            title: Plot title
-            save_path: Path to save the plot
         """
         plt.figure(figsize=(10, 8))
         
@@ -354,6 +388,12 @@ class Visualizer:
         from scipy.interpolate import griddata
         import matplotlib.pyplot as plt
         import numpy as np
+        # Set Matplotlib parameters
+        plt.rcParams['svg.fonttype'] = 'none'
+        plt.rcParams['text.usetex'] = False
+        plt.rcParams['font.family'] = 'Arial'
+        # Set Seaborn context
+        sns.set_context("notebook")
 
         # 固定颜色与 marker 映射（仅此改动）
         COLOR_BY_CLUSTER = {
@@ -370,9 +410,9 @@ class Visualizer:
             '2l': 'p'
         }
 
-        plt.figure(figsize=(10, 8))
+        plt.figure(figsize=(12, 8))
 
-        # 插值网格
+        # generate grid data for contour
         x_min, x_max = np.min(x_data), np.max(x_data)
         y_min, y_max = np.min(y_data), np.max(y_data)
         x_margin = (x_max - x_min) * 0.1
@@ -381,10 +421,10 @@ class Visualizer:
         y_grid = np.linspace(y_min - y_margin, y_max + y_margin, 500)
         X, Y = np.meshgrid(x_grid, y_grid)
 
-        # 插值 Z 值
+        # Interpolate Z values
         Z = griddata((x_data, y_data), z_data, (X, Y), method='linear')
 
-        # 绘制等高线背景
+        # Draw contour background
         z_min, z_max = np.floor(np.min(z_data)), np.ceil(np.max(z_data))
         contour_levels = np.linspace(z_min, z_max, 20)
         contour = plt.contourf(X, Y, Z, levels=contour_levels, cmap='viridis', alpha=0.7)
@@ -392,7 +432,7 @@ class Visualizer:
         cbar.set_label(zlabel, fontsize=18)
         cbar.ax.tick_params(labelsize=18)
 
-        # ✅ 只改这一部分：颜色 = cluster，marker = structure
+        # only change this part: color = cluster, marker = structure
         unique_pairs = sorted(set(zip(clusters, structures)))
         for cluster, structure in unique_pairs:
             mask = (clusters == cluster) & (structures == structure)
@@ -403,7 +443,7 @@ class Visualizer:
                         label=label,
                         color=color,
                         marker=marker,
-                        alpha=0.8, s=120, edgecolors='k')
+                        alpha=0.8, s=80, edgecolors='k')
 
         plt.xlabel(xlabel, fontsize=20)
         plt.ylabel(ylabel, fontsize=20)
@@ -508,7 +548,6 @@ class Visualizer:
                 )
                 logger.info("Combined contour plot created for comparison")
 
-
     def plot_meta_model_coefficients(self, model, feature_names, cluster_name, model_type, stage = None):
         """
         Plot coefficients of a linear meta-model (e.g., Ridge in stacking)
@@ -577,13 +616,6 @@ class Visualizer:
                                 param_name, title_prefix, save_path):
         """
         Scan one hyperparameter and plot its effect on performance.
-        Args:
-            model_class: Estimator class (e.g., GradientBoostingRegressor)
-            param_grid: List of values for the hyperparameter to scan
-            fixed_params: Other fixed hyperparameters
-            param_name: Name of hyperparameter to scan (str)
-            title_prefix: Title prefix for the plot
-            save_path: Where to save the figure
         """
         from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
@@ -693,11 +725,6 @@ class Visualizer:
                                         cluster_name=None, stage=None, save_path=None):
         """
         Visualize the results of Bayesian optimization
-        Args:
-            optimization_results: Results from Bayesian optimization
-            model_type: Type of model ('rf', 'gb', 'xgb')
-            cluster_name: Name of the cluster for the plot title
-            save_path: Path to save the figure
         """
         from skopt.plots import plot_convergence
         import matplotlib.pyplot as plt
@@ -733,14 +760,6 @@ class Visualizer:
                                             title, cluster_name, save_path):
         """
         Visualize meta-model hyperparameter tuning results
-        
-        Args:
-            cv_results: Cross-validation results from GridSearchCV
-            param_name: Name of the parameter being tuned (e.g., 'alpha')
-            param_values: List of parameter values tested
-            title: Plot title
-            cluster_name: Name of the cluster
-            save_path: Path to save the visualization
         """
         plt.figure(figsize=(10, 6))
         
@@ -753,9 +772,9 @@ class Visualizer:
                 test_scores = cv_results['mean_test_score']
                 train_scores = cv_results.get('mean_train_score', [])
                 
-                # 如果param_key存在，使用它来排序
+                # if param_key exists, use it to order the values
                 if param_key in cv_results:
-                    # 将参数值转换为数值，并获取排序索引
+                    # change values to float for sorting
                     param_values = [float(val) for val in cv_results[param_key]]
                     sorted_indices = np.argsort(param_values)
                     
@@ -764,14 +783,14 @@ class Visualizer:
                     
                     if len(train_scores) > 0:
                         train_scores = np.array(train_scores)[sorted_indices]
-                
-                # 绘制测试集和训练集得分
+
+                # plot the score of test and training sets
                 plt.plot(param_values, test_scores, 'o-', color='red', label='Validation score')
                 
                 if len(train_scores) > 0:
                     plt.plot(param_values, train_scores, 'o-', color='blue', label='Training score')
                 
-                # 标记最佳点
+                # mark the best point
                 best_idx = np.argmax(test_scores)
                 best_param = param_values[best_idx]
                 best_score = test_scores[best_idx]
@@ -779,29 +798,29 @@ class Visualizer:
                 plt.scatter([best_param], [best_score], color='gold', edgecolors='black', 
                         s=100, zorder=5, label=f'Best: {best_param:.4f}')
                 
-                # 添加注释
+                # annotate the best point
                 plt.annotate(f'Best value: {best_param:.4f}\nScore: {best_score:.4f}',
                             xy=(best_param, best_score), xytext=(0, 20),
                             textcoords='offset points', ha='center',
                             bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5),
                             arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=.2'))
             else:
-                # 如果缺少所需键，使用提供的param_values
+                # if required keys are missing, use provided param_values
                 plt.text(0.5, 0.5, "Insufficient CV results data", 
                         ha='center', va='center', transform=plt.gca().transAxes)
         else:
-            # 如果cv_results无效，使用提供的param_values
+            # if cv_results is invalid, use provided param_values
             plt.text(0.5, 0.5, "No CV results available", 
                     ha='center', va='center', transform=plt.gca().transAxes)
-        
-        # 设置图表标签和标题
+
+        # set chart labels and title
         plt.xlabel(f'{param_name} value', fontsize=12)
         plt.ylabel('Score (R²)', fontsize=12)
         plt.title(f'{title} - {cluster_name}', fontsize=14)
         plt.grid(True, alpha=0.3)
         plt.legend()
-        
-        # 保存图表
+
+        # save the figure
         if save_path:
             base_path = save_path.with_suffix('')
             for fmt in self.config.get("fig_formats", ["png"]):
@@ -851,10 +870,9 @@ class Visualizer:
                     save_path=save_path
                 )
 
-
     def infer_group_from_feature_name(self, feature_name: str) -> str:
         """
-        Infer the group (Pt_cluster, interface, CeOx) of a feature name using the config FEATURE_GROUPS.
+        Infer the group (Pt cluster, interface, CeOx) of a feature name using the config FEATURE_GROUPS.
         Used when no group_assignment is explicitly provided.
         """
 
@@ -881,7 +899,7 @@ class Visualizer:
             if best_feat in flat_map:
                 return flat_map[best_feat]
             
-        for sep in ['_x_', 'x', '/', '-', '+', '*', '^']:
+        for sep in ['_x_', ' x ', '/', '-', '+', '*', '^']:
             if sep in feature_name:
                 parts = feature_name.split(sep)
                 matched_groups = []
@@ -907,9 +925,6 @@ class Visualizer:
     def assign_feature_to_group_by_correlation(self, df: pd.DataFrame) -> Dict[str, str]:
         """
         Assign each feature to a group based on Pearson correlation with known base features.
-
-        Returns:
-            Dictionary: feature_name -> group_name
         """
         from scipy.stats import pearsonr
         base_groups = self.config.get("FEATURE_GROUPS", {})
@@ -961,7 +976,7 @@ class Visualizer:
 
         inferred_groups = {}
 
-        # === 使用分组信息（优先 group_assignment） ===
+        # prefer group_assignment if provided
         if group_assignment is not None:
             for feat in feature_names:
                 if feat in group_assignment:
@@ -978,7 +993,7 @@ class Visualizer:
         sorted_mapped_names = [mapped_names[i] for i in indices]
         sorted_groups = [inferred_groups[feature_names[i]] for i in indices]
 
-        group_colors = {'Pt_cluster': '#5571abff', 'interface': '#ed936bff', 'CeOx': '#7dc0a7ff'}
+        group_colors = {'Pt cluster': '#3498dbff', 'interface': '#ed936bff', 'CeOx': '#7dc0a7ff'}
         bar_colors = [group_colors.get(g, '#7f7f7f') for g in sorted_groups]
 
         plt.figure(figsize=(16, 8))
@@ -1066,7 +1081,7 @@ class Visualizer:
                 if feat not in group_assignments:
                     group_assignments[feat] = self.infer_group_from_feature_name(feat)
 
-        group_colors = {'Pt_cluster': '#5571abff', 'interface': '#ed936bff', 'CeOx': '#7dc0a7ff'}
+        group_colors = {'Pt cluster': '#3498dbff', 'interface': '#ed936bff', 'CeOx': '#7dc0a7ff'}
 
         G = nx.Graph()
         for _, row in df_sig.iterrows():
@@ -1098,7 +1113,7 @@ class Visualizer:
 
         node_colors = [group_colors.get(node[1]['group'], '#7f7f7f') for node in G.nodes(data=True)]
 
-        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=600, edgecolors='k', alpha=0.7)
+        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors, node_size=600, edgecolors='k', alpha=1.0)
         nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, width=edge_widths)
 
         label_pos = {k: (v[0], v[1] + 0.06) for k, v in pos.items()}

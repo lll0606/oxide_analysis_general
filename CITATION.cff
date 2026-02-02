@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software or dataset in your work, please cite it using the following metadata."
+title: "Dynamic Polaronic Control of Metal Cluster Adaptability on Reducible Oxides"
+authors:
+  - family-names: "Li"
+    given-names: "Lulu"
+    orcid: "https://orcid.org/0000-0002-7790-090X"
+    affiliation: "Institute of Chemical Research of Catalonia (ICIQ‑CERCA), The Barcelona Institute of Science and Technology (BIST), Tarragona, Spain"
+  - family-names: "Geiger"
+    given-names: "Julian"
+    orcid: "https://orcid.org/0000-0003-0023-1960"
+    affiliation: "Institute of Chemical Research of Catalonia (ICIQ‑CERCA), The Barcelona Institute of Science and Technology (BIST), Tarragona, Spain"
+  - family-names: "Sanz Berman"
+    given-names: "Pol"
+    orcid: "https://orcid.org/0000-0001-8736-404X"
+    affiliation: "Institute of Chemical Research of Catalonia (ICIQ‑CERCA), The Barcelona Institute of Science and Technology (BIST), Tarragona, Spain; Universitat Rovira i Virgili, Tarragona, Spain"
+  - family-names: "López"
+    given-names: "Núria"
+    orcid: "https://orcid.org/0000-0001-9150-5941"
+    affiliation: "Institute of Chemical Research of Catalonia (ICIQ‑CERCA), The Barcelona Institute of Science and Technology (BIST), Tarragona, Spain"
+journal: "Journal of the American Chemical Society"
+publisher: "American Chemical Society"
+type: "article-journal"
+keywords:
+  - "machine learning"
+  - "catalysis"
+  - "Pt‑Pt clusters"
+  - "oxygen vacancies"
+abstract: |
+  Metal−oxide interactions are ubiquitous in many technological applications and involve a complex interplay between the oxide support and the metal nanoparticle. Particularly, it has been proposed that in strong metal−support interaction, the defect chemistry affects the metal cluster morphology. Here we develop a physics-guided machine learning framework to decode these interactions using Pt7 and Pt13 representative of planar and tridimensional clusters, analyzing the impact of across oxygen vacancy concentrations of CeO2−x = 0−12.5% (528 configurations). Our models (R2 > 0.97) reveal that polaron swarms, rather than defect concentrations, predominantly control cluster shape and charge through size-dependent pathways. The framework yields quantitative design principles for defect-driven catalyst optimization and provides a general methodology for systematic mechanisms of metal−support interactions across diverse catalyst systems.
